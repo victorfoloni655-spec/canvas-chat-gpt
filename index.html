@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chat Canvas + GPT</title>
+<style>
+  :root{--tiffany:#81D8D0;--bg:#0f1216;--card:#151a21;--text:#eaf2fb;--muted:#9fb3c8;--border:#243041}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Arial}
+  .wrap{max-width:800px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--tiffany)}
+  .title{font-weight:600}
+  .chat{padding:16px;display:flex;flex-direction:column;gap:10px;height:60vh;overflow:auto}
+  .msg{max-width:80%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;white-space:pre-wrap}
+  .user{align-self:flex-end;background:rgba(129,216,208,.12)}
+  .bot{align-self:flex-start;background:#0d1117}
+  .footer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
+  input,button{font:inherit}
+  input{flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
+  button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
+  button:disabled{opacity:.6;cursor:not-allowed}
+</style>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header"><span class="dot"></span><div class="title">Chat do Curso</div></div>
+      <div id="chat" class="chat"></div>
+      <div class="footer">
+        <input id="input" placeholder="Digite sua pergunta..." />
+        <button id="send">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+  IMPORTANTE:
+  - Quando seu site estiver na Vercel, esta página e a função /api/chat
+    estarão no MESMO domínio. Por isso usamos API_URL = "/api/chat".
+  - Não troque nada aqui agora. Depois do deploy, já funciona.
+*/
+const API_URL = "/api/chat";
+
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const btn = document.getElementById('send');
+
+const messages = [
+  { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
+];
+
+function addMsg(text, who){
+  const el = document.createElement('div');
+  el.className = `msg ${who}`;
+  el.textContent = text;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function send(){
+  const text = input.value.trim();
+  if(!text) return;
+  addMsg(text, 'user');
+  input.value = ''; btn.disabled = true;
+
+  messages.push({ role: "user", content: text });
+
+  // Chama sua API com streaming (SSE)
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ messages, stream: true })
+  });
+
+  if(!res.ok){
+    addMsg("Erro no servidor. Tente novamente.", 'bot');
+    btn.disabled = false; return;
+  }
+
+  let acc = "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  while(true){
+    const {value, done} = await reader.read();
+    if(done) break;
+    const chunk = decoder.decode(value);
+
+    // O endpoint envia linhas SSE no formato: "data: {...}\n\n"
+    chunk.split("\n").forEach(line=>{
+      if(line.startsWith("data: ")){
+        const data = line.slice(6).trim();
+        if(data === "[DONE]") return;
+        try{
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta?.content || "";
+          if(delta){
+            acc += delta;
+            if(acc.length === delta.length){
+              addMsg(delta, 'bot'); // cria a primeira bolha da resposta
+            }else{
+              chat.lastChild.textContent = acc; // atualiza a bolha em tempo real
+            }
+          }
+        }catch{}
+      }
+    });
+  }
+
+  messages.push({ role: "assistant", content: acc || "(sem conteúdo)" });
+  btn.disabled = false;
+}
+
+btn.onclick = send;
+input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+</script>
+</body>
+</html>
