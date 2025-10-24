@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "undici": "^6.19.8",
-    "jose": "^5.2.0"
+    "jose": "^5.2.0",
+    "@upstash/redis": "^1.28.4"
   }
 }
