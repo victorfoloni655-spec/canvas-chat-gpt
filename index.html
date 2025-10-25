@@ -8,9 +8,11 @@
   body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Arial}
   .wrap{max-width:800px;margin:0 auto;padding:16px}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-  .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center}
+  .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .left{display:flex;gap:8px;align-items:center}
   .dot{width:10px;height:10px;border-radius:50%;background:var(--tiffany)}
   .title{font-weight:600}
+  .badge{padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#0f172a;font:500 12px system-ui;box-shadow:0 1px 3px rgba(0,0,0,.08)}
   .chat{padding:16px;display:flex;flex-direction:column;gap:10px;height:60vh;overflow:auto}
   .msg{max-width:80%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;white-space:pre-wrap}
   .user{align-self:flex-end;background:rgba(129,216,208,.12)}
@@ -24,7 +26,10 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="header"><span class="dot"></span><div class="title">Chat do Curso</div></div>
+      <div class="header">
+        <div class="left"><span class="dot"></span><div class="title">Chat do Curso</div></div>
+        <div id="quota-badge" class="badge">carregando…</div>
+      </div>
       <div id="chat" class="chat"></div>
       <div class="footer">
         <input id="input" placeholder="Digite sua pergunta..." />
@@ -35,16 +40,17 @@
 
 <script>
 /*
-  IMPORTANTE:
-  - Quando seu site estiver na Vercel, esta página e a função /api/chat
-    estarão no MESMO domínio. Por isso usamos API_URL = "/api/chat".
-  - Não troque nada aqui agora. Depois do deploy, já funciona.
+  Importante:
+  - Usamos URLs RELATIVAS para evitar CORS: '/api/chat' e '/api/quota'
+  - Sempre enviamos credenciais para o cookie LTI: credentials: 'include'
 */
-const API_URL = "/api/chat";
+const CHAT_URL  = '/api/chat';
+const QUOTA_URL = '/api/quota';
 
-const chat = document.getElementById('chat');
+const chat  = document.getElementById('chat');
 const input = document.getElementById('input');
-const btn = document.getElementById('send');
+const btn   = document.getElementById('send');
+const badge = document.getElementById('quota-badge');
 
 const messages = [
   { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
@@ -58,61 +64,75 @@ function addMsg(text, who){
   chat.scrollTop = chat.scrollHeight;
 }
 
+async function atualizarQuota(){
+  try {
+    const r = await fetch(QUOTA_URL, { credentials: 'include' });
+    if (r.status === 401) { badge.textContent = 'entre pelo Canvas'; return; }
+    if (!r.ok) throw new Error('quota not ok');
+    const { remaining, limit } = await r.json();
+    badge.textContent = `Restantes: ${remaining} / ${limit}`;
+    if (remaining <= 20) { badge.style.background = '#fff7ed'; badge.style.color = '#9a3412'; }
+    else { badge.style.background = '#f1f5f9'; badge.style.color = '#0f172a'; }
+  } catch {
+    badge.textContent = 'quota indisponível';
+  }
+}
+
 async function send(){
   const text = input.value.trim();
   if(!text) return;
   addMsg(text, 'user');
-  input.value = ''; btn.disabled = true;
+  input.value = '';
+  btn.disabled = true;
 
   messages.push({ role: "user", content: text });
 
-  // Chama sua API com streaming (SSE)
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ messages, stream: true })
-  });
-
-  if(!res.ok){
-    addMsg("Erro no servidor. Tente novamente.", 'bot');
-    btn.disabled = false; return;
-  }
-
-  let acc = "";
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  while(true){
-    const {value, done} = await reader.read();
-    if(done) break;
-    const chunk = decoder.decode(value);
-
-    // O endpoint envia linhas SSE no formato: "data: {...}\n\n"
-    chunk.split("\n").forEach(line=>{
-      if(line.startsWith("data: ")){
-        const data = line.slice(6).trim();
-        if(data === "[DONE]") return;
-        try{
-          const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta?.content || "";
-          if(delta){
-            acc += delta;
-            if(acc.length === delta.length){
-              addMsg(delta, 'bot'); // cria a primeira bolha da resposta
-            }else{
-              chat.lastChild.textContent = acc; // atualiza a bolha em tempo real
-            }
-          }
-        }catch{}
-      }
+  let data;
+  try {
+    const res = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      credentials: "include", // leva cookie lti_user
+      body: JSON.stringify({ messages }) // sem streaming
     });
+
+    if (res.status === 429) {
+      const j = await res.json().catch(() => ({}));
+      addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
+      btn.disabled = false;
+      await atualizarQuota();
+      return;
+    }
+
+    if(!res.ok){
+      const j = await res.json().catch(() => ({}));
+      console.error('Falha /api/chat', res.status, j);
+      addMsg("Erro no servidor. Tente novamente.", 'bot');
+      btn.disabled = false;
+      return;
+    }
+
+    data = await res.json();
+  } catch (err) {
+    console.error('Erro de rede /api/chat:', err);
+    addMsg("Erro de rede. Tente novamente.", 'bot');
+    btn.disabled = false;
+    return;
   }
 
-  messages.push({ role: "assistant", content: acc || "(sem conteúdo)" });
+  const reply = data.reply || "(sem conteúdo)";
+  addMsg(reply, 'bot');
+  messages.push({ role: "assistant", content: reply });
+
   btn.disabled = false;
+  atualizarQuota();
 }
 
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+
+// Carrega quota ao abrir
+document.addEventListener('DOMContentLoaded', atualizarQuota);
 </script>
 </body>
 </html>
