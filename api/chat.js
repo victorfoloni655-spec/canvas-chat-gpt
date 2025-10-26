@@ -10,6 +10,11 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
 
+// Links de checkout (opcionais). Se não definir, o botão não aparece.
+const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
+const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
+const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
+
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -91,11 +96,18 @@ export default async function handler(req, res) {
     const key = monthKey(counterId);
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
+      // Monta a lista de pacotes que você configurou nas ENVs
+      const packages = [];
+      if (CHECKOUT_URL_50)  packages.push({ label: "+50 mensagens",  url: CHECKOUT_URL_50,  amount: 50  });
+      if (CHECKOUT_URL_100) packages.push({ label: "+100 mensagens", url: CHECKOUT_URL_100, amount: 100 });
+      if (CHECKOUT_URL_200) packages.push({ label: "+200 mensagens", url: CHECKOUT_URL_200, amount: 200 });
+
       return res.status(429).json({
         error: "limit_reached",
         message: "Limite mensal atingido.",
         used,
         limit: MONTHLY_LIMIT,
+        packages, // << o front usa para renderizar os botões
       });
     }
 
