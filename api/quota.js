@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const limit = Number(process.env.MONTHLY_LIMIT || 4);
+    const limit = Number(process.env.MONTHLY_LIMIT || 400);
     const key = monthKey(user);
     const used = Number((await redis.get(key)) || 0);
     const remaining = Math.max(0, limit - used);
