@@ -22,6 +22,15 @@
   input{flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
   button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
   button:disabled{opacity:.6;cursor:not-allowed}
+
+  /* --- NOVO: estilos dos botões de upgrade --- */
+  .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+  .cta-btn{
+    display:inline-block;background:#81D8D0;color:#0b1f1e;
+    padding:8px 14px;border-radius:999px;border:0;text-decoration:none;
+    font-weight:700; box-shadow:0 1px 3px rgba(0,0,0,.1)
+  }
+  .cta-btn:hover{filter:brightness(0.95)}
 </style>
 <body>
   <div class="wrap">
@@ -64,6 +73,34 @@ function addMsg(text, who){
   chat.scrollTop = chat.scrollHeight;
 }
 
+/* --- NOVO: renderiza os botões de upgrade --- */
+function addCTAPackages(packages){
+  const el = document.createElement('div');
+  el.className = 'msg bot';
+
+  const txt = document.createElement('div');
+  txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cta-wrap';
+
+  (packages || []).forEach(p => {
+    if (!p?.url) return;
+    const a = document.createElement('a');
+    a.className = 'cta-btn';
+    a.href = p.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = p.label || 'Comprar';
+    wrap.appendChild(a);
+  });
+
+  el.appendChild(txt);
+  el.appendChild(wrap);
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
+
 async function atualizarQuota(){
   try {
     const r = await fetch(QUOTA_URL, { credentials: 'include' });
@@ -99,6 +136,12 @@ async function send(){
     if (res.status === 429) {
       const j = await res.json().catch(() => ({}));
       addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
+
+      // NOVO: mostra os botões recebidos do backend
+      if (Array.isArray(j.packages) && j.packages.length > 0) {
+        addCTAPackages(j.packages);
+      }
+
       btn.disabled = false;
       await atualizarQuota();
       return;
