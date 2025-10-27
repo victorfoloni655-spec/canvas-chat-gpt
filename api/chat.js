@@ -94,6 +94,18 @@ export default async function handler(req, res) {
 
     // Limite mensal
     const key = monthKey(counterId);
+
+    // ===== NOVO: registrar o usuário deste mês num SET (para listagem admin) =====
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const monthSetKey = `${QUOTA_PREFIX}_users:${y}-${m}`;
+    await redis.sadd(monthSetKey, counterId);
+    // expira o SET no 1º dia do próximo mês (UTC), igual às chaves de quota
+    const setExpireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
+    await redis.expireat(monthSetKey, setExpireAt);
+    // ============================================================================
+    
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
       // Monta a lista de pacotes que você configurou nas ENVs
