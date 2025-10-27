@@ -1,5 +1,6 @@
 // /api/chat.js
-// Chat + limitador mensal no Redis (por usuário). Compatível com LTI: usa cookie lti_user.
+// Chat + limitador mensal no Redis (por usuário) + histórico mensal.
+// Compatível com LTI: usa cookie lti_user.
 
 import { Redis } from "@upstash/redis";
 
@@ -9,6 +10,7 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history"; // << NOVO
 
 // Links de checkout (opcionais). Se não definir, o botão não aparece.
 const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
@@ -30,6 +32,14 @@ function monthKey(userId) {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0"); // 01..12
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
+}
+
+// << NOVO: chave do histórico mensal desse usuário >>
+function monthHistoryKey(userId) {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${HISTORY_PREFIX}:${y}-${m}:${userId}`;
 }
 
 // incrementa e expira no 1º dia do próximo mês (UTC)
@@ -95,7 +105,7 @@ export default async function handler(req, res) {
     // Limite mensal
     const key = monthKey(counterId);
 
-    // ===== NOVO: registrar o usuário deste mês num SET (para listagem admin) =====
+    // ===== registra o usuário deste mês num SET (para listagem admin) =====
     const now = new Date();
     const y = now.getUTCFullYear();
     const m = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -104,8 +114,8 @@ export default async function handler(req, res) {
     // expira o SET no 1º dia do próximo mês (UTC), igual às chaves de quota
     const setExpireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
     await redis.expireat(monthSetKey, setExpireAt);
-    // ============================================================================
-    
+    // =====================================================================
+
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
       // Monta a lista de pacotes que você configurou nas ENVs
@@ -119,12 +129,29 @@ export default async function handler(req, res) {
         message: "Limite mensal atingido.",
         used,
         limit: MONTHLY_LIMIT,
-        packages, // << o front usa para renderizar os botões
+        packages, // front renderiza os botões
       });
     }
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
+
+    // << NOVO: gravar histórico (última pergunta e a resposta) >>
+    try {
+      const hkey = monthHistoryKey(counterId);
+      const lastUserMsg = messages[messages.length - 1]?.content || "";
+      const item = { ts: Date.now(), q: lastUserMsg, a: reply };
+
+      await redis.lpush(hkey, JSON.stringify(item)); // adiciona no topo
+      await redis.ltrim(hkey, 0, 99);               // mantém só 100 itens
+      // expira o histórico junto com a cota (1º dia do próximo mês)
+      const histExpireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
+      await redis.expireat(hkey, histExpireAt);
+    } catch (e) {
+      console.warn("hist save warn:", e?.message || e);
+    }
+    // -------------------------------------------------------------
+
     return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
   } catch (e) {
     console.error("CHAT error:", e);
