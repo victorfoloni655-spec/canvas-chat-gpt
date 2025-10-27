@@ -6,7 +6,12 @@
 <style>
   :root{--tiffany:#81D8D0;--bg:#0f1216;--card:#151a21;--text:#eaf2fb;--muted:#9fb3c8;--border:#243041}
   body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Arial}
-  .wrap{max-width:800px;margin:0 auto;padding:16px}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+
+  /* layout principal */
+  .grid { display:grid; grid-template-columns:280px 1fr; gap:16px; }
+
+  /* cartão do chat */
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;justify-content:space-between}
   .left{display:flex;gap:8px;align-items:center}
@@ -23,7 +28,7 @@
   button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
   button:disabled{opacity:.6;cursor:not-allowed}
 
-  /* --- NOVO: estilos dos botões de upgrade --- */
+  /* botões de upgrade */
   .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
   .cta-btn{
     display:inline-block;background:#81D8D0;color:#0b1f1e;
@@ -31,18 +36,51 @@
     font-weight:700; box-shadow:0 1px 3px rgba(0,0,0,.1)
   }
   .cta-btn:hover{filter:brightness(0.95)}
+
+  /* sidebar de histórico */
+  .sidebar {
+    background: var(--card); border:1px solid var(--border); border-radius:16px;
+    padding:12px; box-shadow:0 10px 30px rgba(0,0,0,.25);
+    height:60vh; overflow:auto;
+  }
+  .sidebar header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .sidebar h3 { margin: 6px 0 0; font-size:14px; color: var(--muted); }
+  .hist-item {
+    border:1px solid var(--border); border-radius:10px; padding:8px; margin-bottom:8px;
+    cursor:pointer; background:#0d1117;
+  }
+  .hist-item:hover { filter: brightness(1.05); }
+  .hist-q { color:#bcd2e8; font-weight:600; font-size:13px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hist-a { color:#9fb3c8; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .small-btn {
+    background:#223044; color:#eaf2fb; border:1px solid var(--border);
+    border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer;
+  }
+  .small-btn:disabled { opacity:.6; cursor:not-allowed; }
 </style>
 <body>
   <div class="wrap">
-    <div class="card">
-      <div class="header">
-        <div class="left"><span class="dot"></span><div class="title">IA English Journey</div></div>
-        <div id="quota-badge" class="badge">carregando…</div>
-      </div>
-      <div id="chat" class="chat"></div>
-      <div class="footer">
-        <input id="input" placeholder="Digite sua pergunta..." />
-        <button id="send">Enviar</button>
+    <div class="grid">
+      <!-- Sidebar: Histórico -->
+      <aside class="sidebar">
+        <header>
+          <h3>Histórico (mês)</h3>
+          <button id="clear-history" class="small-btn">Limpar</button>
+        </header>
+        <div id="history-list"></div>
+      </aside>
+
+      <!-- Chat -->
+      <div class="card">
+        <div class="header">
+          <div class="left"><span class="dot"></span><div class="title">IA English Journey</div></div>
+          <div id="quota-badge" class="badge">carregando…</div>
+        </div>
+        <div id="chat" class="chat"></div>
+        <div class="footer">
+          <input id="input" placeholder="Digite sua pergunta..." />
+          <button id="send">Enviar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -50,16 +88,20 @@
 <script>
 /*
   Importante:
-  - Usamos URLs RELATIVAS para evitar CORS: '/api/chat' e '/api/quota'
-  - Sempre enviamos credenciais para o cookie LTI: credentials: 'include'
+  - URLs RELATIVAS: '/api/chat', '/api/quota', '/api/history'
+  - Sempre com credenciais para levar o cookie LTI: credentials: 'include'
 */
-const CHAT_URL  = '/api/chat';
-const QUOTA_URL = '/api/quota';
+const CHAT_URL    = '/api/chat';
+const QUOTA_URL   = '/api/quota';
+const HISTORY_URL = '/api/history';
 
-const chat  = document.getElementById('chat');
-const input = document.getElementById('input');
-const btn   = document.getElementById('send');
-const badge = document.getElementById('quota-badge');
+const chat   = document.getElementById('chat');
+const input  = document.getElementById('input');
+const btn    = document.getElementById('send');
+const badge  = document.getElementById('quota-badge');
+
+const histList = document.getElementById('history-list');
+const clearBtn = document.getElementById('clear-history');
 
 const messages = [
   { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
@@ -73,7 +115,7 @@ function addMsg(text, who){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* --- NOVO: renderiza os botões de upgrade --- */
+/* botões de upgrade */
 function addCTAPackages(packages){
   const el = document.createElement('div');
   el.className = 'msg bot';
@@ -101,6 +143,7 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
+/* QUOTA */
 async function atualizarQuota(){
   try {
     const r = await fetch(QUOTA_URL, { credentials: 'include' });
@@ -115,6 +158,78 @@ async function atualizarQuota(){
   }
 }
 
+/* HISTÓRICO */
+function fmtTime(ts){
+  try {
+    const d = new Date(ts);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mi = String(d.getMinutes()).padStart(2,'0');
+    return `${dd}/${mm} ${hh}:${mi}`;
+  } catch { return ''; }
+}
+
+function renderHistory(items){
+  histList.innerHTML = '';
+  if (!items || items.length === 0) {
+    histList.innerHTML = '<div style="color:var(--muted);font-size:12px;">Sem histórico neste mês.</div>';
+    return;
+  }
+  items.forEach(it => {
+    const div = document.createElement('div');
+    div.className = 'hist-item';
+    div.title = new Date(it.ts).toLocaleString();
+
+    const q = document.createElement('div');
+    q.className = 'hist-q';
+    q.textContent = `(${fmtTime(it.ts)}) ${it.q || ''}`;
+
+    const a = document.createElement('div');
+    a.className = 'hist-a';
+    a.textContent = it.a || '';
+
+    div.appendChild(q);
+    div.appendChild(a);
+
+    // Ao clicar, "reproduz" no chat (só visual para revisão)
+    div.addEventListener('click', () => {
+      if (it.q) addMsg(it.q, 'user');
+      if (it.a) addMsg(it.a, 'bot');
+      chat.scrollTop = chat.scrollHeight;
+    });
+
+    histList.appendChild(div);
+  });
+}
+
+async function loadHistory(){
+  try {
+    const r = await fetch(HISTORY_URL, { credentials: 'include' });
+    if (r.status === 401) { renderHistory([]); return; }
+    const j = await r.json();
+    renderHistory(j.items || []);
+  } catch (e) {
+    console.error('history load fail', e);
+    renderHistory([]);
+  }
+}
+
+async function clearHistory(){
+  if (!confirm('Apagar seu histórico deste mês?')) return;
+  clearBtn.disabled = true;
+  try {
+    const r = await fetch(HISTORY_URL, { method:'DELETE', credentials: 'include' });
+    if (r.ok) loadHistory();
+  } catch (e) {
+    console.error('history clear fail', e);
+  } finally {
+    clearBtn.disabled = false;
+  }
+}
+clearBtn.addEventListener('click', clearHistory);
+
+/* ENVIO */
 async function send(){
   const text = input.value.trim();
   if(!text) return;
@@ -137,7 +252,7 @@ async function send(){
       const j = await res.json().catch(() => ({}));
       addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
 
-      // NOVO: mostra os botões recebidos do backend
+      // mostrar botões de upgrade, se vierem
       if (Array.isArray(j.packages) && j.packages.length > 0) {
         addCTAPackages(j.packages);
       }
@@ -169,13 +284,17 @@ async function send(){
 
   btn.disabled = false;
   atualizarQuota();
+  loadHistory(); // <-- atualiza a sidebar após cada resposta
 }
 
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
 
-// Carrega quota ao abrir
-document.addEventListener('DOMContentLoaded', atualizarQuota);
+// Ao abrir a página
+document.addEventListener('DOMContentLoaded', () => {
+  atualizarQuota();
+  loadHistory();
+});
 </script>
 </body>
 </html>
