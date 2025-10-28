@@ -1,7 +1,5 @@
 // /api/chat.js
-// Chat + limitador mensal no Redis (por usuário) + histórico mensal.
-// Compatível com LTI: usa cookie lti_user.
-
+// Chat + limitador mensal no Redis (por usuário). Compatível com LTI: usa cookie lti_user.
 import { Redis } from "@upstash/redis";
 
 // ====== CONFIG ======
@@ -10,7 +8,6 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history"; // << NOVO
 
 // Links de checkout (opcionais). Se não definir, o botão não aparece.
 const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
@@ -26,22 +23,12 @@ const redis = new Redis({
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
 }
-
 function monthKey(userId) {
   const now = new Date();
   const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0"); // 01..12
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
-
-// << NOVO: chave do histórico mensal desse usuário >>
-function monthHistoryKey(userId) {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `${HISTORY_PREFIX}:${y}-${m}:${userId}`;
-}
-
 // incrementa e expira no 1º dia do próximo mês (UTC)
 async function incrMonthlyAndCheck(key, limit) {
   const used = await redis.incr(key);
@@ -55,39 +42,27 @@ async function incrMonthlyAndCheck(key, limit) {
 
 // ====== OPENAI ======
 async function callOpenAI(messages) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY não configurada");
-  }
-
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.7,
-    }),
+    body: JSON.stringify({ model: OPENAI_MODEL, messages, temperature: 0.7 }),
   });
-
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
     throw new Error(`OpenAI erro ${resp.status}: ${txt}`);
   }
-
   const data = await resp.json();
-  const reply = data?.choices?.[0]?.message?.content ?? "";
-  return reply;
+  return data?.choices?.[0]?.message?.content ?? "";
 }
 
 // ====== HANDLER ======
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const body = await readJson(req);
     const { messages, user } = body || {};
@@ -104,21 +79,8 @@ export default async function handler(req, res) {
 
     // Limite mensal
     const key = monthKey(counterId);
-
-    // ===== registra o usuário deste mês num SET (para listagem admin) =====
-    const now = new Date();
-    const y = now.getUTCFullYear();
-    const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-    const monthSetKey = `${QUOTA_PREFIX}_users:${y}-${m}`;
-    await redis.sadd(monthSetKey, counterId);
-    // expira o SET no 1º dia do próximo mês (UTC), igual às chaves de quota
-    const setExpireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
-    await redis.expireat(monthSetKey, setExpireAt);
-    // =====================================================================
-
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
-      // Monta a lista de pacotes que você configurou nas ENVs
       const packages = [];
       if (CHECKOUT_URL_50)  packages.push({ label: "+50 mensagens",  url: CHECKOUT_URL_50,  amount: 50  });
       if (CHECKOUT_URL_100) packages.push({ label: "+100 mensagens", url: CHECKOUT_URL_100, amount: 100 });
@@ -129,29 +91,12 @@ export default async function handler(req, res) {
         message: "Limite mensal atingido.",
         used,
         limit: MONTHLY_LIMIT,
-        packages, // front renderiza os botões
+        packages,
       });
     }
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
-
-    // << NOVO: gravar histórico (última pergunta e a resposta) >>
-    try {
-      const hkey = monthHistoryKey(counterId);
-      const lastUserMsg = messages[messages.length - 1]?.content || "";
-      const item = { ts: Date.now(), q: lastUserMsg, a: reply };
-
-      await redis.lpush(hkey, JSON.stringify(item)); // adiciona no topo
-      await redis.ltrim(hkey, 0, 99);               // mantém só 100 itens
-      // expira o histórico junto com a cota (1º dia do próximo mês)
-      const histExpireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
-      await redis.expireat(hkey, histExpireAt);
-    } catch (e) {
-      console.warn("hist save warn:", e?.message || e);
-    }
-    // -------------------------------------------------------------
-
     return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
   } catch (e) {
     console.error("CHAT error:", e);
@@ -159,12 +104,8 @@ export default async function handler(req, res) {
   }
 }
 
-// Leitor simples de JSON
+// leitor simples de JSON
 async function readJson(req) {
-  const ctype = (req.headers["content-type"] || "").toLowerCase();
-  if (!ctype.includes("application/json")) {
-    // tenta mesmo assim
-  }
   const raw = await new Promise((resolve) => {
     let d = "";
     req.on("data", (c) => (d += c));
@@ -172,7 +113,4 @@ async function readJson(req) {
   });
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
-
-export const config = {
-  api: { bodyParser: false }, // usamos readJson manual
-};
+export const config = { api: { bodyParser: false } };
