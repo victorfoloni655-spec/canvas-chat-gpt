@@ -1,26 +1,30 @@
 <!doctype html>
 <html lang="pt-br">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Chat Canvas + GPT</title>
 <style>
   :root{--tiffany:#81D8D0;--bg:#0f1216;--card:#151a21;--text:#eaf2fb;--muted:#9fb3c8;--border:#243041}
-  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Arial}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,Segoe UI,Roboto,Arial}
   .wrap{max-width:800px;margin:0 auto;padding:16px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;min-height:60vh}
   .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;justify-content:space-between}
   .left{display:flex;gap:8px;align-items:center}
   .dot{width:10px;height:10px;border-radius:50%;background:var(--tiffany)}
   .title{font-weight:600}
   .badge{padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#0f172a;font:500 12px system-ui;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  .chat{padding:16px;display:flex;flex-direction:column;gap:10px;height:60vh;overflow:auto}
+  .chat{padding:16px;display:flex;flex-direction:column;gap:10px;overflow:auto;min-height:240px}
   .msg{max-width:80%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;white-space:pre-wrap}
   .user{align-self:flex-end;background:rgba(129,216,208,.12)}
   .bot{align-self:flex-start;background:#0d1117}
-  .footer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
+  .footer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border);align-items:center}
   input,button{font:inherit}
-  input{flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
-  button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
+  input{
+    flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);
+    border-radius:10px;padding:12px 10px;font-size:16px; /* >=16px evita zoom no iOS */
+  }
+  button{background:var(--tiffany);border:0;border-radius:10px;padding:12px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
   button:disabled{opacity:.6;cursor:not-allowed}
   /* CTAs de upgrade */
   .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
@@ -40,7 +44,7 @@
       </div>
       <div id="chat" class="chat"></div>
       <div class="footer">
-        <input id="input" placeholder="Digite sua pergunta..." />
+        <input id="input" placeholder="Digite sua pergunta..." autocomplete="off" autocapitalize="sentences" />
         <button id="send">Enviar</button>
       </div>
     </div>
@@ -55,6 +59,23 @@ const input = document.getElementById('input');
 const btn   = document.getElementById('send');
 const badge = document.getElementById('quota-badge');
 
+/* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
+function captureTokenFromURL(){
+  const u = new URL(window.location.href);
+  const t = u.searchParams.get('t');
+  if (t) {
+    localStorage.setItem('lti_token', t);
+    // (opcional) remove ?t da URL sem recarregar
+    u.searchParams.delete('t');
+    window.history.replaceState({}, '', u.toString());
+  }
+  return t;
+}
+function getToken(){
+  return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
+}
+
+/* ---------------- UI helpers ---------------- */
 const messages = [
   { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
 ];
@@ -94,11 +115,16 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
+/* ---------------- QUOTA ---------------- */
 async function atualizarQuota(){
   try {
-    const r = await fetch(QUOTA_URL, { credentials: 'include' });
-    if (r.status === 401) { badge.textContent = 'entre pelo Canvas'; return; }
-    if (!r.ok) throw new Error('quota not ok');
+    const t = getToken();
+    const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) {
+      if (r.status === 401) { badge.textContent = 'entre pelo Canvas'; return; }
+      throw new Error('quota not ok');
+    }
     const { remaining, limit } = await r.json();
     badge.textContent = `Restantes: ${remaining} / ${limit}`;
     if (remaining <= 20) { badge.style.background = '#fff7ed'; badge.style.color = '#9a3412'; }
@@ -108,6 +134,7 @@ async function atualizarQuota(){
   }
 }
 
+/* ---------------- SEND ---------------- */
 async function send(){
   const text = input.value.trim();
   if(!text) return;
@@ -119,11 +146,15 @@ async function send(){
 
   let data;
   try {
+    const t = getToken();
+    const body = { messages };
+    if (t) body.t = t; // envia token de fallback no body
+
     const res = await fetch(CHAT_URL, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       credentials: "include",
-      body: JSON.stringify({ messages })
+      body: JSON.stringify(body)
     });
 
     if (res.status === 429) {
@@ -161,7 +192,34 @@ async function send(){
 
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
-document.addEventListener('DOMContentLoaded', atualizarQuota);
+
+/* ---------- Correções de teclado/viewport no mobile (iframe) ---------- */
+// Ajusta a área visível quando o teclado abre no iOS (visualViewport)
+(function fixViewportForKeyboard(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const onResize = () => {
+    const h = vv.height;
+    chat.style.maxHeight = Math.max(120, h - 160) + 'px';
+    chat.scrollTop = chat.scrollHeight;
+  };
+  vv.addEventListener('resize', onResize);
+  vv.addEventListener('scroll', onResize);
+})();
+
+// Mantém a última mensagem visível ao focar o input
+input.addEventListener('focus', () => {
+  setTimeout(() => {
+    chat.scrollTop = chat.scrollHeight;
+    input.scrollIntoView({ block: 'nearest' });
+  }, 250);
+});
+
+/* ---------- Init ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  captureTokenFromURL();   // pega ?t=... (se vier)
+  atualizarQuota();
+});
 </script>
 </body>
 </html>
