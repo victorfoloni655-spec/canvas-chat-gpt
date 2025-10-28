@@ -22,8 +22,7 @@
   input{flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
   button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
   button:disabled{opacity:.6;cursor:not-allowed}
-
-  /* --- NOVO: estilos dos botões de upgrade --- */
+  /* CTAs de upgrade */
   .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
   .cta-btn{
     display:inline-block;background:#81D8D0;color:#0b1f1e;
@@ -48,11 +47,6 @@
   </div>
 
 <script>
-/*
-  Importante:
-  - Usamos URLs RELATIVAS para evitar CORS: '/api/chat' e '/api/quota'
-  - Sempre enviamos credenciais para o cookie LTI: credentials: 'include'
-*/
 const CHAT_URL  = '/api/chat';
 const QUOTA_URL = '/api/quota';
 
@@ -73,7 +67,6 @@ function addMsg(text, who){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* --- NOVO: renderiza os botões de upgrade --- */
 function addCTAPackages(packages){
   const el = document.createElement('div');
   el.className = 'msg bot';
@@ -129,19 +122,14 @@ async function send(){
     const res = await fetch(CHAT_URL, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      credentials: "include", // leva cookie lti_user
-      body: JSON.stringify({ messages }) // sem streaming
+      credentials: "include",
+      body: JSON.stringify({ messages })
     });
 
     if (res.status === 429) {
       const j = await res.json().catch(() => ({}));
       addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
-
-      // NOVO: mostra os botões recebidos do backend
-      if (Array.isArray(j.packages) && j.packages.length > 0) {
-        addCTAPackages(j.packages);
-      }
-
+      if (Array.isArray(j.packages) && j.packages.length > 0) addCTAPackages(j.packages);
       btn.disabled = false;
       await atualizarQuota();
       return;
@@ -173,8 +161,6 @@ async function send(){
 
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
-
-// Carrega quota ao abrir
 document.addEventListener('DOMContentLoaded', atualizarQuota);
 </script>
 </body>
