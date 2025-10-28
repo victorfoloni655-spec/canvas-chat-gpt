@@ -1,6 +1,9 @@
 // /api/chat.js
-// Chat + limitador mensal no Redis (por usuário). Compatível com LTI: usa cookie lti_user.
+// Chat + limitador mensal no Redis (por usuário).
+// Identidade: cookie lti_user (quando existir) OU token 't' (JWT) no body — funciona em iframe (iOS/Android).
+
 import { Redis } from "@upstash/redis";
+import { jwtVerify } from "jose";
 
 // ====== CONFIG ======
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // obrigatório
@@ -9,7 +12,7 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
 
-// Links de checkout (opcionais). Se não definir, o botão não aparece.
+// Links de checkout (opcionais)
 const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
@@ -40,6 +43,16 @@ async function incrMonthlyAndCheck(key, limit) {
   return { used, blocked: used > limit };
 }
 
+async function getUserIdFromToken(t) {
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+    const { payload } = await jwtVerify(t, secret);
+    return payload?.sub || null; // sub = userId
+  } catch {
+    return null;
+  }
+}
+
 // ====== OPENAI ======
 async function callOpenAI(messages) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
@@ -65,17 +78,23 @@ export default async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const body = await readJson(req);
-    const { messages, user } = body || {};
+    const { messages, user, t } = body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
-    // Identidade do aluno: cookie LTI -> user do body -> IP
+    // Identidade do aluno: cookie LTI -> token 't' -> user do body -> IP
     const cookies = parseCookies(req.headers.cookie || "");
     const ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "anon")
       .toString().split(",")[0].trim();
+
+    let counterId = cookies["lti_user"];
+    if (!counterId && t) {
+      const fromT = await getUserIdFromToken(t);
+      if (fromT) counterId = fromT;
+    }
     const userFromBody = user && String(user).slice(0, 128);
-    const counterId = cookies["lti_user"] || userFromBody || `ip:${ip}`;
+    if (!counterId) counterId = userFromBody || `ip:${ip}`;
 
     // Limite mensal
     const key = monthKey(counterId);
