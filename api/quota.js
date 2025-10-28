@@ -1,5 +1,6 @@
-// /api/quota.js — devolve uso mensal do aluno atual (via cookie lti_user)
+// /api/quota.js — devolve uso mensal do aluno atual
 import { Redis } from "@upstash/redis";
+import { jwtVerify } from "jose";
 
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
@@ -10,8 +11,9 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// IMPORTANTe: prefixo e chave devem ser IGUAIS aos do /api/chat.js
-const QUOTA_PREFIX = process.env.QUOTA_PREFIX || "quota";
+// IMPORTANTE: prefixo deve ser igual ao do /api/chat.js
+const QUOTA_PREFIX  = process.env.QUOTA_PREFIX || "quota";
+const MONTHLY_LIMIT = Number(process.env.MONTHLY_LIMIT || 400);
 
 function monthKey(userId) {
   const now = new Date();
@@ -20,25 +22,43 @@ function monthKey(userId) {
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
+async function verifyToken(t) {
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+    const { payload } = await jwtVerify(t, secret);
+    return payload?.sub || null; // sub = userId
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   try {
+    // 1) tenta cookie
     const cookies = parseCookies(req.headers.cookie || "");
-    const user = cookies["lti_user"]; // setado em /api/lti/launch
+    let user = cookies["lti_user"];
+
+    // 2) fallback: token ?t=... na query (funciona dentro do iframe no iOS/Android)
+    if (!user) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const t = url.searchParams.get("t");
+      if (t) user = await verifyToken(t);
+    }
 
     if (!user) {
       return res.status(401).json({
-        error: "no_lti_cookie",
-        detail: "Abra o chat pelo Canvas para identificarmos você.",
+        error: "no_user",
+        detail: "Abra o chat pelo Canvas (ou com token).",
       });
     }
 
-    const limit = Number(process.env.MONTHLY_LIMIT || 400);
     const key = monthKey(user);
     const used = Number((await redis.get(key)) || 0);
-    const remaining = Math.max(0, limit - used);
+    const remaining = Math.max(0, MONTHLY_LIMIT - used);
 
-    res.status(200).json({ user, key, used, remaining, limit });
+    return res.status(200).json({ user, key, used, remaining, limit: MONTHLY_LIMIT });
   } catch (e) {
-    res.status(500).json({ error: e?.message || "quota error" });
+    console.error("QUOTA error:", e);
+    return res.status(500).json({ error: e?.message || "quota error" });
   }
 }
