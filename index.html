@@ -8,7 +8,7 @@
   body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Arial}
   .wrap{max-width:1000px;margin:0 auto;padding:16px}
 
-  /* layout principal */
+  /* layout desktop */
   .grid { display:grid; grid-template-columns:280px 1fr; gap:16px; }
 
   /* cartão do chat */
@@ -27,6 +27,10 @@
   input{flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
   button{background:var(--tiffany);border:0;border-radius:10px;padding:10px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
   button:disabled{opacity:.6;cursor:not-allowed}
+  .small-btn {
+    background:#223044; color:#eaf2fb; border:1px solid var(--border);
+    border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer;
+  }
 
   /* botões de upgrade */
   .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
@@ -37,7 +41,7 @@
   }
   .cta-btn:hover{filter:brightness(0.95)}
 
-  /* sidebar de histórico */
+  /* sidebar/histórico (desktop) */
   .sidebar {
     background: var(--card); border:1px solid var(--border); border-radius:16px;
     padding:12px; box-shadow:0 10px 30px rgba(0,0,0,.25);
@@ -52,16 +56,50 @@
   .hist-item:hover { filter: brightness(1.05); }
   .hist-q { color:#bcd2e8; font-weight:600; font-size:13px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .hist-a { color:#9fb3c8; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .small-btn {
-    background:#223044; color:#eaf2fb; border:1px solid var(--border);
-    border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer;
+
+  /* ====== MOBILE: histórico vira drawer ====== */
+  .drawer-toggle{ display:none } /* botão só no mobile */
+  .drawer { display:none }       /* container do drawer */
+  .backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.5);
+    opacity:0; pointer-events:none; transition:opacity .2s ease;
   }
-  .small-btn:disabled { opacity:.6; cursor:not-allowed; }
+  .drawer-panel{
+    position:fixed; top:0; right:0; height:100vh; width:86%;
+    max-width:380px; background:var(--card); border-left:1px solid var(--border);
+    transform:translateX(100%); transition:transform .25s ease;
+    display:flex; flex-direction:column; padding:12px; z-index:50;
+  }
+  .drawer-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .drawer.open .backdrop{ opacity:1; pointer-events:auto }
+  .drawer.open .drawer-panel{ transform:translateX(0) }
+
+  @media (max-width: 960px){
+    .grid{ display:block }            /* esconde sidebar fixa */
+    .sidebar{ display:none }
+    .drawer-toggle{ display:inline-block }  /* mostra botão Histórico */
+    .drawer{ display:block }
+  }
 </style>
 <body>
   <div class="wrap">
+    <!-- Drawer (mobile) -->
+    <div id="drawer" class="drawer" aria-hidden="true">
+      <div id="backdrop" class="backdrop"></div>
+      <aside class="drawer-panel" role="dialog" aria-modal="true" aria-label="Histórico">
+        <div class="drawer-header">
+          <h3 style="margin:6px 0 0; font-size:14px; color:var(--muted)">Histórico (mês)</h3>
+          <div style="display:flex; gap:8px">
+            <button id="clear-history-m" class="small-btn">Limpar</button>
+            <button id="close-drawer" class="small-btn">Fechar</button>
+          </div>
+        </div>
+        <div id="history-list-m" style="overflow:auto"></div>
+      </aside>
+    </div>
+
     <div class="grid">
-      <!-- Sidebar: Histórico -->
+      <!-- Sidebar (desktop) -->
       <aside class="sidebar">
         <header>
           <h3>Histórico (mês)</h3>
@@ -73,8 +111,14 @@
       <!-- Chat -->
       <div class="card">
         <div class="header">
-          <div class="left"><span class="dot"></span><div class="title">IA English Journey</div></div>
-          <div id="quota-badge" class="badge">carregando…</div>
+          <div class="left">
+            <span class="dot"></span>
+            <div class="title">IA English Journey</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button id="open-drawer" class="small-btn drawer-toggle">Histórico</button>
+            <div id="quota-badge" class="badge">carregando…</div>
+          </div>
         </div>
         <div id="chat" class="chat"></div>
         <div class="footer">
@@ -86,11 +130,7 @@
   </div>
 
 <script>
-/*
-  Importante:
-  - URLs RELATIVAS: '/api/chat', '/api/quota', '/api/history'
-  - Sempre com credenciais para levar o cookie LTI: credentials: 'include'
-*/
+/* URLs relativas + cookies LTI */
 const CHAT_URL    = '/api/chat';
 const QUOTA_URL   = '/api/quota';
 const HISTORY_URL = '/api/history';
@@ -100,6 +140,15 @@ const input  = document.getElementById('input');
 const btn    = document.getElementById('send');
 const badge  = document.getElementById('quota-badge');
 
+/* Drawer refs */
+const drawer       = document.getElementById('drawer');
+const backdrop     = document.getElementById('backdrop');
+const openDrawer   = document.getElementById('open-drawer');
+const closeDrawer  = document.getElementById('close-drawer');
+const histListMob  = document.getElementById('history-list-m');
+const clearBtnMob  = document.getElementById('clear-history-m');
+
+/* Sidebar desktop refs */
 const histList = document.getElementById('history-list');
 const clearBtn = document.getElementById('clear-history');
 
@@ -115,35 +164,27 @@ function addMsg(text, who){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* botões de upgrade */
+/* Upgrade buttons */
 function addCTAPackages(packages){
   const el = document.createElement('div');
   el.className = 'msg bot';
-
   const txt = document.createElement('div');
   txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'cta-wrap';
+  const wrap = document.createElement('div'); wrap.className = 'cta-wrap';
 
   (packages || []).forEach(p => {
     if (!p?.url) return;
     const a = document.createElement('a');
-    a.className = 'cta-btn';
-    a.href = p.url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.className = 'cta-btn'; a.href = p.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
     a.textContent = p.label || 'Comprar';
     wrap.appendChild(a);
   });
 
-  el.appendChild(txt);
-  el.appendChild(wrap);
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
+  el.appendChild(txt); el.appendChild(wrap);
+  chat.appendChild(el); chat.scrollTop = chat.scrollHeight;
 }
 
-/* QUOTA */
+/* Quota */
 async function atualizarQuota(){
   try {
     const r = await fetch(QUOTA_URL, { credentials: 'include' });
@@ -153,15 +194,12 @@ async function atualizarQuota(){
     badge.textContent = `Restantes: ${remaining} / ${limit}`;
     if (remaining <= 20) { badge.style.background = '#fff7ed'; badge.style.color = '#9a3412'; }
     else { badge.style.background = '#f1f5f9'; badge.style.color = '#0f172a'; }
-  } catch {
-    badge.textContent = 'quota indisponível';
-  }
+  } catch { badge.textContent = 'quota indisponível'; }
 }
 
-/* HISTÓRICO */
+/* ---------- Histórico ---------- */
 function fmtTime(ts){
-  try {
-    const d = new Date(ts);
+  try { const d = new Date(ts);
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     const hh = String(d.getHours()).padStart(2,'0');
@@ -170,66 +208,63 @@ function fmtTime(ts){
   } catch { return ''; }
 }
 
+function makeHistItem(it){
+  const div = document.createElement('div'); div.className = 'hist-item'; div.title = new Date(it.ts).toLocaleString();
+  const q = document.createElement('div'); q.className = 'hist-q'; q.textContent = `(${fmtTime(it.ts)}) ${it.q || ''}`;
+  const a = document.createElement('div'); a.className = 'hist-a'; a.textContent = it.a || '';
+  div.appendChild(q); div.appendChild(a);
+  div.addEventListener('click', () => { if (it.q) addMsg(it.q,'user'); if (it.a) addMsg(it.a,'bot'); chat.scrollTop = chat.scrollHeight; });
+  return div;
+}
+
 function renderHistory(items){
-  histList.innerHTML = '';
-  if (!items || items.length === 0) {
-    histList.innerHTML = '<div style="color:var(--muted);font-size:12px;">Sem histórico neste mês.</div>';
-    return;
+  // desktop
+  if (histList){
+    histList.innerHTML = '';
+    if (!items || items.length === 0){
+      histList.innerHTML = '<div style="color:var(--muted);font-size:12px;">Sem histórico neste mês.</div>';
+    } else {
+      items.forEach(it => histList.appendChild(makeHistItem(it)));
+    }
   }
-  items.forEach(it => {
-    const div = document.createElement('div');
-    div.className = 'hist-item';
-    div.title = new Date(it.ts).toLocaleString();
-
-    const q = document.createElement('div');
-    q.className = 'hist-q';
-    q.textContent = `(${fmtTime(it.ts)}) ${it.q || ''}`;
-
-    const a = document.createElement('div');
-    a.className = 'hist-a';
-    a.textContent = it.a || '';
-
-    div.appendChild(q);
-    div.appendChild(a);
-
-    // Ao clicar, "reproduz" no chat (só visual para revisão)
-    div.addEventListener('click', () => {
-      if (it.q) addMsg(it.q, 'user');
-      if (it.a) addMsg(it.a, 'bot');
-      chat.scrollTop = chat.scrollHeight;
-    });
-
-    histList.appendChild(div);
-  });
+  // mobile drawer
+  if (histListMob){
+    histListMob.innerHTML = '';
+    if (!items || items.length === 0){
+      histListMob.innerHTML = '<div style="color:var(--muted);font-size:12px;">Sem histórico neste mês.</div>';
+    } else {
+      items.forEach(it => histListMob.appendChild(makeHistItem(it)));
+    }
+  }
 }
 
 async function loadHistory(){
-  try {
+  try{
     const r = await fetch(HISTORY_URL, { credentials: 'include' });
-    if (r.status === 401) { renderHistory([]); return; }
+    if (r.status === 401){ renderHistory([]); return; }
     const j = await r.json();
     renderHistory(j.items || []);
-  } catch (e) {
-    console.error('history load fail', e);
-    renderHistory([]);
-  }
+  }catch(e){ console.error('history load fail', e); renderHistory([]); }
 }
 
 async function clearHistory(){
   if (!confirm('Apagar seu histórico deste mês?')) return;
-  clearBtn.disabled = true;
   try {
-    const r = await fetch(HISTORY_URL, { method:'DELETE', credentials: 'include' });
-    if (r.ok) loadHistory();
-  } catch (e) {
-    console.error('history clear fail', e);
-  } finally {
-    clearBtn.disabled = false;
-  }
+    await fetch(HISTORY_URL, { method:'DELETE', credentials:'include' });
+    loadHistory();
+  } catch (e) { console.error(e); }
 }
-clearBtn.addEventListener('click', clearHistory);
+if (clearBtn)  clearBtn.addEventListener('click', clearHistory);
+if (clearBtnMob) clearBtnMob.addEventListener('click', clearHistory);
 
-/* ENVIO */
+/* Drawer actions (mobile) */
+function openHist(){ drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false'); }
+function closeHist(){ drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
+if (openDrawer)  openDrawer.addEventListener('click', () => { openHist(); loadHistory(); });
+if (closeDrawer) closeDrawer.addEventListener('click', closeHist);
+if (backdrop)    backdrop.addEventListener('click', closeHist);
+
+/* Envio */
 async function send(){
   const text = input.value.trim();
   if(!text) return;
@@ -244,19 +279,14 @@ async function send(){
     const res = await fetch(CHAT_URL, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      credentials: "include", // leva cookie lti_user
-      body: JSON.stringify({ messages }) // sem streaming
+      credentials: "include",
+      body: JSON.stringify({ messages })
     });
 
     if (res.status === 429) {
       const j = await res.json().catch(() => ({}));
       addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
-
-      // mostrar botões de upgrade, se vierem
-      if (Array.isArray(j.packages) && j.packages.length > 0) {
-        addCTAPackages(j.packages);
-      }
-
+      if (Array.isArray(j.packages) && j.packages.length > 0) addCTAPackages(j.packages);
       btn.disabled = false;
       await atualizarQuota();
       return;
@@ -284,13 +314,12 @@ async function send(){
 
   btn.disabled = false;
   atualizarQuota();
-  loadHistory(); // <-- atualiza a sidebar após cada resposta
+  loadHistory(); // atualiza histórico após cada resposta
 }
 
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
 
-// Ao abrir a página
 document.addEventListener('DOMContentLoaded', () => {
   atualizarQuota();
   loadHistory();
