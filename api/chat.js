@@ -78,23 +78,27 @@ export default async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const body = await readJson(req);
-    const { messages, user, t } = body || {};
+    const { messages, t } = body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
-    // Identidade do aluno: cookie LTI -> token 't' -> user do body -> IP
+    // Identidade do aluno: cookie LTI -> token 't' -> (recusa sem identidade)
     const cookies = parseCookies(req.headers.cookie || "");
-    const ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "anon")
-      .toString().split(",")[0].trim();
-
     let counterId = cookies["lti_user"];
+
     if (!counterId && t) {
       const fromT = await getUserIdFromToken(t);
       if (fromT) counterId = fromT;
     }
-    const userFromBody = user && String(user).slice(0, 128);
-    if (!counterId) counterId = userFromBody || `ip:${ip}`;
+
+    // ❌ SEM fallback por IP ou 'user' do body
+    if (!counterId) {
+      return res.status(401).json({
+        error: "no_user",
+        detail: "Abra pelo Canvas (LTI) para identificar o aluno.",
+      });
+    }
 
     // Limite mensal
     const key = monthKey(counterId);
