@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "undici": "^6.19.8",
+    "@upstash/redis": "^1.28.4",
     "jose": "^5.2.0",
-    "@upstash/redis": "^1.28.4"
+    "undici": "^6.19.8"
   }
 }
