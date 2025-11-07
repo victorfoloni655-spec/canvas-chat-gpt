@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     const clientId    = assertEnv("LTI_CLIENT_ID",              process.env.LTI_CLIENT_ID);
     const auth        = assertEnv("LTI_AUTHORIZATION_ENDPOINT", process.env.LTI_AUTHORIZATION_ENDPOINT);
     const redirectUri = assertEnv("LTI_REDIRECT_URI",           process.env.LTI_REDIRECT_URI);
-    assertEnv("LTI_ISSUER", process.env.LTI_ISSUER); // só valida, não usamos aqui
+    assertEnv("LTI_ISSUER", process.env.LTI_ISSUER); // só valida existência (checado no launch)
 
     let login_hint = "";
     let lti_message_hint = "";
@@ -27,18 +27,19 @@ export default async function handler(req, res) {
 
     const ctype = (req.headers["content-type"] || "").toLowerCase();
 
+    // Canvas pode chamar GET (mais comum) ou POST form_post (mais raro)
     if (req.method === "POST" && ctype.includes("application/x-www-form-urlencoded")) {
       const raw = await readBody(req);
       const p = new URLSearchParams(raw);
-      login_hint = p.get("login_hint") || "";
-      lti_message_hint = p.get("lti_message_hint") || "";
-      iss = p.get("iss") || "";
+      login_hint      = p.get("login_hint") || "";
+      lti_message_hint= p.get("lti_message_hint") || "";
+      iss             = p.get("iss") || "";
     } else {
-      // GET (ou POST sem form): tenta pegar pela querystring
+      // GET (ou POST sem form): pega pela querystring
       const q = req.query || {};
-      login_hint = q.login_hint || "";
+      login_hint       = q.login_hint || "";
       lti_message_hint = q.lti_message_hint || "";
-      iss = q.iss || "";
+      iss              = q.iss || "";
     }
 
     console.log("LTI LOGIN method:", req.method, "ctype:", ctype);
@@ -48,8 +49,8 @@ export default async function handler(req, res) {
       return res.status(400).json({
         error: "missing_login_or_message_hint",
         detail:
-          "O Canvas deve chamar este endpoint (LTI 1.3) com login_hint e lti_message_hint. " +
-          "Se o erro persistir, verifique a instalação por Client ID e o placement Course Navigation → /api/lti/login.",
+          "O Canvas deve chamar este endpoint com login_hint e lti_message_hint (LTI 1.3).\n" +
+          "Verifique se a instalação foi por Client ID e se o placement (Course Navigation ou Module Item) aponta para /api/lti/login.",
         received: { login_hint, lti_message_hint, iss, method: req.method }
       });
     }
@@ -84,3 +85,6 @@ export default async function handler(req, res) {
     res.status(500).json({ error: e?.message || "login error" });
   }
 }
+
+// Importante: ler POST form_post cru
+export const config = { api: { bodyParser: false } };
