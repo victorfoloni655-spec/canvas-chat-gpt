@@ -1,4 +1,6 @@
 // /api/quota.js — devolve uso mensal do aluno atual
+// Suporta: cookie lti_user (desktop) OU token 't' (JWT) via query (mobile/iframe)
+
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
 
@@ -11,8 +13,7 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// IMPORTANTE: prefixo deve ser igual ao do /api/chat.js
-const QUOTA_PREFIX  = process.env.QUOTA_PREFIX || "quota";
+const QUOTA_PREFIX = process.env.QUOTA_PREFIX || "quota";
 const MONTHLY_LIMIT = Number(process.env.MONTHLY_LIMIT || 400);
 
 function monthKey(userId) {
@@ -22,11 +23,11 @@ function monthKey(userId) {
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
-async function verifyToken(t) {
+async function getUserFromToken(t) {
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
     const { payload } = await jwtVerify(t, secret);
-    return payload?.sub || null; // sub = userId
+    return payload?.sub || null; // sub = userId (hash) que geramos no launch
   } catch {
     return null;
   }
@@ -34,21 +35,25 @@ async function verifyToken(t) {
 
 export default async function handler(req, res) {
   try {
-    // 1) tenta cookie
-    const cookies = parseCookies(req.headers.cookie || "");
-    let user = cookies["lti_user"];
+    // 1) tenta token 't' (mobile/iframe)
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    const t = url.searchParams.get("t");
 
-    // 2) fallback: token ?t=... na query (funciona dentro do iframe no iOS/Android)
+    let user = null;
+    if (t) {
+      user = await getUserFromToken(t);
+    }
+
+    // 2) fallback: cookie (desktop)
     if (!user) {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      const t = url.searchParams.get("t");
-      if (t) user = await verifyToken(t);
+      const cookies = parseCookies(req.headers.cookie || "");
+      user = cookies["lti_user"] || null;
     }
 
     if (!user) {
       return res.status(401).json({
-        error: "no_user",
-        detail: "Abra o chat pelo Canvas (ou com token).",
+        error: "no_identity",
+        detail: "Abra pelo Canvas (LTI) para identificar você.",
       });
     }
 
@@ -56,9 +61,10 @@ export default async function handler(req, res) {
     const used = Number((await redis.get(key)) || 0);
     const remaining = Math.max(0, MONTHLY_LIMIT - used);
 
-    return res.status(200).json({ user, key, used, remaining, limit: MONTHLY_LIMIT });
+    res.status(200).json({ user, key, used, remaining, limit: MONTHLY_LIMIT });
   } catch (e) {
-    console.error("QUOTA error:", e);
-    return res.status(500).json({ error: e?.message || "quota error" });
+    res.status(500).json({ error: e?.message || "quota error" });
   }
 }
+
+export const config = { api: { bodyParser: false } };
