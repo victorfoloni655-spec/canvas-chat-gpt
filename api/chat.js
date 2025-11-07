@@ -1,6 +1,6 @@
 // /api/chat.js
 // Chat + limitador mensal no Redis (por usuário).
-// Identidade: cookie lti_user (quando existir) OU token 't' (JWT) no body — funciona em iframe (iOS/Android).
+// Identidade: cookie lti_user (desktop) OU token 't' (JWT) no body — funciona em iframe (iOS/Android).
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -26,12 +26,14 @@ const redis = new Redis({
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
 }
+
 function monthKey(userId) {
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
+
 // incrementa e expira no 1º dia do próximo mês (UTC)
 async function incrMonthlyAndCheck(key, limit) {
   const used = await redis.incr(key);
@@ -56,6 +58,7 @@ async function getUserIdFromToken(t) {
 // ====== OPENAI ======
 async function callOpenAI(messages) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
+
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -64,6 +67,7 @@ async function callOpenAI(messages) {
     },
     body: JSON.stringify({ model: OPENAI_MODEL, messages, temperature: 0.7 }),
   });
+
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
     throw new Error(`OpenAI erro ${resp.status}: ${txt}`);
@@ -92,7 +96,7 @@ export default async function handler(req, res) {
       if (fromT) counterId = fromT;
     }
 
-    // ❌ SEM fallback por IP ou 'user' do body
+    // ❌ SEM fallback por IP ou 'user' do body (obrigamos vir do Canvas)
     if (!counterId) {
       return res.status(401).json({
         error: "no_user",
@@ -100,7 +104,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Limite mensal
+    // Limite mensal (conta no envio)
     const key = monthKey(counterId);
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
@@ -136,4 +140,5 @@ async function readJson(req) {
   });
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
+
 export const config = { api: { bodyParser: false } };
