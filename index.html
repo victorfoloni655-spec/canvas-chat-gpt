@@ -220,6 +220,52 @@ document.addEventListener('DOMContentLoaded', () => {
   captureTokenFromURL();   // pega ?t=... (se vier)
   atualizarQuota();
 });
+/* ===== DEBUG TEMPORÁRIO (remova depois que testar) ===== */
+
+// 1) Banner fixo no rodapé mostrando se o token está salvo
+(function debugBanner(){
+  try{
+    const t = (localStorage.getItem('lti_token') || '').toString();
+    const has = !!t;
+    const tail = has ? t.slice(-8) : 'none';
+
+    const bar = document.createElement('div');
+    bar.id = 'debug-token-bar';
+    bar.style.cssText = [
+      'position:sticky','bottom:0','left:0','right:0',
+      'background:#0b1f1e','color:#81D8D0','padding:6px 10px',
+      'font:12px system-ui','border-top:1px solid #243041','z-index:9999'
+    ].join(';');
+
+    bar.textContent = has
+      ? `Mobile auth: token OK (…${tail})`
+      : 'Mobile auth: sem token; abra pelo Módulo novamente';
+
+    document.body.appendChild(bar);
+  }catch(e){}
+})();
+
+// 2) Botão "Ver quota (debug)" — abre /api/quota?t=... em nova aba
+(function debugQuotaLink(){
+  try{
+    const t = localStorage.getItem('lti_token');
+    if(!t) return; // só mostra se tiver token salvo (mobile/iframe)
+
+    const a = document.createElement('a');
+    a.href = `/api/quota?t=${encodeURIComponent(t)}`;
+    a.textContent = 'Ver quota (debug)';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.cssText = [
+      'position:sticky','bottom:28px','left:8px',
+      'display:inline-block','background:#81D8D0','color:#0b1f1e',
+      'padding:6px 10px','border-radius:8px','font:12px system-ui',
+      'text-decoration:none','z-index:9999'
+    ].join(';');
+
+    document.body.appendChild(a);
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
