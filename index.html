@@ -220,30 +220,6 @@ document.addEventListener('DOMContentLoaded', () => {
   captureTokenFromURL();   // pega ?t=... (se vier)
   atualizarQuota();
 });
-/* ===== DEBUG TEMPORÁRIO (remova depois que testar) ===== */
-
-// 1) Banner fixo no rodapé mostrando se o token está salvo
-(function debugBanner(){
-  try{
-    const t = (localStorage.getItem('lti_token') || '').toString();
-    const has = !!t;
-    const tail = has ? t.slice(-8) : 'none';
-
-    const bar = document.createElement('div');
-    bar.id = 'debug-token-bar';
-    bar.style.cssText = [
-      'position:sticky','bottom:0','left:0','right:0',
-      'background:#0b1f1e','color:#81D8D0','padding:6px 10px',
-      'font:12px system-ui','border-top:1px solid #243041','z-index:9999'
-    ].join(';');
-
-    bar.textContent = has
-      ? `Mobile auth: token OK (…${tail})`
-      : 'Mobile auth: sem token; abra pelo Módulo novamente';
-
-    document.body.appendChild(bar);
-  }catch(e){}
-})();
 </script>
 </body>
 </html>
