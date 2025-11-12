@@ -244,28 +244,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(bar);
   }catch(e){}
 })();
-
-// 2) Botão "Ver quota (debug)" — abre /api/quota?t=... em nova aba
-(function debugQuotaLink(){
-  try{
-    const t = localStorage.getItem('lti_token');
-    if(!t) return; // só mostra se tiver token salvo (mobile/iframe)
-
-    const a = document.createElement('a');
-    a.href = `/api/quota?t=${encodeURIComponent(t)}`;
-    a.textContent = 'Ver quota (debug)';
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.cssText = [
-      'position:sticky','bottom:28px','left:8px',
-      'display:inline-block','background:#81D8D0','color:#0b1f1e',
-      'padding:6px 10px','border-radius:8px','font:12px system-ui',
-      'text-decoration:none','z-index:9999'
-    ].join(';');
-
-    document.body.appendChild(a);
-  }catch(e){}
-})();
 </script>
 </body>
 </html>
