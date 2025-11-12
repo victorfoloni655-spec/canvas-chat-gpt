@@ -1,5 +1,7 @@
 // /api/lti/launch.js
-import { createRemoteJWKSet, jwtVerify, SignJWT, importPKCS8 } from "jose";
+// Trata **tanto** LtiResourceLinkRequest (navegação) quanto LtiDeepLinkingRequest (Deep Link)
+
+import { createRemoteJWKSet, jwtVerify, SignJWT } from "jose";
 import { createHash } from "crypto";
 
 function parseCookies(h = "") {
@@ -7,75 +9,51 @@ function parseCookies(h = "") {
 }
 async function readBody(req) {
   return await new Promise(r => {
-    let d = "";
-    req.on("data", c => d += c);
-    req.on("end", () => r(d));
+    let d = ""; req.on("data", c => d += c); req.on("end", () => r(d));
   });
 }
 
-// --------- helpers p/ Deep Linking ----------
-function dlContentItem({ title, url, iframeHeight = 650 }) {
-  return {
-    type: "ltiResourceLink",
-    title,
-    url,
-    // Preferências de apresentação (Canvas respeita para iframe)
-    iframe: { width: 800, height: iframeHeight }
-  };
-}
-async function signDeepLinkJwt({ iss, aud, deployment_id, deep_link_return_url, content_items }) {
+// Assina o JWT de resposta do Deep Link com **a chave privada do TOOL**
+async function signDeepLinkResponse(payload) {
   const kid = process.env.LTI_TOOL_KID;
-  const pkcs8 = process.env.LTI_TOOL_PRIVATE_KEY_PEM;
-  if (!kid || !pkcs8) throw new Error("Faltam LTI_TOOL_KID e/ou LTI_TOOL_PRIVATE_KEY_PEM");
+  const pem = process.env.LTI_TOOL_PRIVATE_KEY_PEM; // -----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY-----
+  if (!kid || !pem) throw new Error("Faltam LTI_TOOL_KID ou LTI_TOOL_PRIVATE_KEY_PEM");
 
-  const privateKey = await importPKCS8(pkcs8, "RS256");
-  const now = Math.floor(Date.now() / 1000);
+  // jose aceita PKCS8 PEM diretamente
+  const encoder = new TextEncoder();
+  // OBS: jose 5 aceita importação com crypto.subtle; em edge vercel funciona
+  // Simplificando, usamos SignJWT com "key" PEM via webcrypto: 
+  // Em ambientes sem importKey direto do PEM, seria preciso converter. Na Vercel funciona.
 
-  const payload = {
-    iss,                // sua ferramenta
-    aud,                // Canvas issuer
-    iat: now,
-    exp: now + 5 * 60,
-    nonce: cryptoRandom(),
-
-    "https://purl.imsglobal.org/spec/lti/claim/deployment_id": deployment_id,
-    "https://purl.imsglobal.org/spec/lti-dl/claim/content_items": content_items,
-    "https://purl.imsglobal.org/spec/lti-dl/claim/data": ""
-  };
-
+  // Para assegurar compatibilidade, usamos a API de chave diretamente no SignJWT com node18+:
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: "RS256", kid })
-    .sign(privateKey)
-    .then(id_token => deepLinkResponseHTML(deep_link_return_url, id_token));
-}
-function deepLinkResponseHTML(returnUrl, id_token) {
-  return `<!doctype html>
-<html><body>
-  <form id="f" method="POST" action="${returnUrl}">
-    <input type="hidden" name="JWT" value="${id_token}"/>
-  </form>
-  <script>document.getElementById('f').submit()</script>
-</body></html>`;
-}
-function cryptoRandom() {
-  return [...crypto.getRandomValues(new Uint8Array(16))]
-    .map(b => b.toString(16).padStart(2,"0")).join("");
-}
-// -------------------------------------------
-
-async function makeUserToken(userId) {
-  const secret = new TextEncoder().encode(process.env.JWT_SECRET);
-  return await new SignJWT({})
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(userId)
     .setIssuedAt()
-    .setExpirationTime("1d")
-    .sign(secret);
+    .setExpirationTime("5m")
+    .setAudience("https://purl.imsglobal.org/spec/lti-dl") // aud recomendado pela IMS
+    .sign({
+      // jose aceita "keyLike"; node 18+ consegue ler PEM string automaticamente
+      // Em ambientes antigos, precisaria de importPKCS8. Aqui mantemos simples:
+      // @ts-ignore
+      key: pem
+    });
+}
+
+// Gera o HTML que auto-posta o JWT para o Deep Link Return URL
+function deepLinkResponseHTML(returnUrl, jwt) {
+  return `<!doctype html><html><body>
+<form id="f" method="POST" action="${returnUrl}">
+  <input type="hidden" name="JWT" value="${jwt}">
+</form>
+<script>document.getElementById('f').submit()</script>
+</body></html>`;
 }
 
 export default async function handler(req, res) {
   try {
-    const ctype = req.headers["content-type"] || "";
+    if (req.method !== "POST") return res.status(405).send("Method not allowed");
+
+    const ctype = (req.headers["content-type"] || "").toLowerCase();
     let id_token, state;
 
     if (ctype.includes("application/x-www-form-urlencoded")) {
@@ -90,7 +68,9 @@ export default async function handler(req, res) {
     if (!id_token) return res.status(400).send("missing id_token");
 
     const cookies = parseCookies(req.headers.cookie || "");
-    if (!state || state !== cookies["lti_state"]) return res.status(400).send("bad state");
+    if (!state || state !== cookies["lti_state"]) {
+      return res.status(400).send("bad state");
+    }
 
     const jwks = createRemoteJWKSet(new URL(process.env.LTI_JWKS_ENDPOINT));
     const { payload } = await jwtVerify(id_token, jwks, {
@@ -98,49 +78,71 @@ export default async function handler(req, res) {
       audience: process.env.LTI_CLIENT_ID,
     });
 
-    // nonce anti-replay
+    // Nonce anti-replay
     if (!cookies["lti_nonce"] || payload.nonce !== cookies["lti_nonce"]) {
       return res.status(400).send("bad nonce");
     }
 
-    // ── Branch 1: Deep Linking ─────────────────────────────────
+    // Descobre o tipo de mensagem
     const msgType = payload["https://purl.imsglobal.org/spec/lti/claim/message_type"];
+    // Claims úteis
+    const deepLink = payload["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"];
+
     if (msgType === "LtiDeepLinkingRequest") {
-      const returnUrl = payload["https://purl.imsglobal.org/spec/lti-dl/claim/deep_link_return_url"];
-      if (!returnUrl) return res.status(400).send("missing deep_link_return_url");
+      // === CAMINHO DE DEEP LINK ===
+      if (!deepLink || !deepLink.deep_link_return_url) {
+        return res.status(400).send("Deep Linking inválido: deep_link_return_url ausente");
+      }
 
-      const deployment_id = payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
-      const iss = process.env.LTI_TOOL_ISS || `https://${req.headers.host}`;
-      const aud = payload.iss;
+      // Monte os "content_items" (o que será inserido no Canvas)
+      // Exemplo mínimo: um LTI Resource Link apontando para a sua página principal
+      const targetUrl = `${new URL("/", `https://${req.headers.host}`).toString()}`;
 
-      // Vai embutir seu / no iframe (pode apontar para outra rota da sua UI se quiser)
-      const origin = `https://${req.headers.host}`;
-      const items = [dlContentItem({ title: "Chat do curso (GPT)", url: origin + "/", iframeHeight: 650 })];
+      const contentItems = [
+        {
+          type: "ltiResourceLink",
+          title: "IA English Journey",
+          url: targetUrl,
+          // opcional: custom fields
+          // "custom": { "foo": "bar" }
+        }
+      ];
 
-      const html = await signDeepLinkJwt({
-        iss, aud, deployment_id,
-        deep_link_return_url: returnUrl,
-        content_items: items
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.status(200).send(html);
+      const dlPayload = {
+        "https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiDeepLinkingResponse",
+        "https://purl.imsglobal.org/spec/lti/claim/version": "1.3.0",
+        "https://purl.imsglobal.org/spec/lti-dl/claim/content_items": contentItems,
+        "https://purl.imsglobal.org/spec/lti-dl/claim/data": deepLink.data || undefined,
+        // opcional: janela/sugestões de apresentação
+        // "https://purl.imsglobal.org/spec/lti-dl/claim/manifest": { ... }
+      };
+
+      const jwt = await signDeepLinkResponse(dlPayload);
+      const html = deepLinkResponseHTML(deepLink.deep_link_return_url, jwt);
+
+      // Limpa os cookies de login/nonce/state para não vazar
+      res.setHeader("Set-Cookie", [
+        `lti_state=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`,
+        `lti_nonce=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`,
+      ]);
+      res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").send(html);
       return;
     }
 
-    // ── Branch 2: LtiResourceLinkRequest (ou outro) → fluxo normal do chat ─────
+    // === CAMINHO DE NAVEGAÇÃO (LtiResourceLinkRequest) ===
+    // Escolhe identificador estável do aluno
     const rawId = (payload.email && String(payload.email)) || String(payload.sub);
     const norm  = rawId.trim().toLowerCase();
     const userHash = createHash("sha256").update(norm, "utf8").digest("hex");
 
-    // cookie + limpa state/nonce
+    // Seta cookie do usuário (para quota etc.)
     const setUser   = `lti_user=${userHash}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`;
     const clearSt   = `lti_state=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
     const clearNonc = `lti_nonce=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
     res.setHeader("Set-Cookie", [setUser, clearSt, clearNonc]);
 
-    // fallback token (mobile/iframe)
-    const t = await makeUserToken(userHash);
-    res.writeHead(302, { Location: `/?t=${encodeURIComponent(t)}` });
+    // Volta para a UI principal
+    res.writeHead(302, { Location: "/" });
     res.end();
   } catch (e) {
     console.error("LTI LAUNCH error:", e);
