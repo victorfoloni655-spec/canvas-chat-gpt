@@ -33,7 +33,9 @@ async function makeUserToken(userId) {
 
 // importa a CHAVE PRIVADA para assinar RS256 (Deep Link)
 async function getPrivateKey() {
-  const pem = process.env.LTI_TOOL_PRIVATE_KEY_PEM && process.env.LTI_TOOL_PRIVATE_KEY_PEM.trim();
+  const pem =
+    process.env.LTI_TOOL_PRIVATE_KEY_PEM &&
+    process.env.LTI_TOOL_PRIVATE_KEY_PEM.trim();
   if (pem && pem.startsWith("-----BEGIN")) {
     return await importPKCS8(pem, "RS256");
   }
@@ -42,7 +44,9 @@ async function getPrivateKey() {
     const jwk = JSON.parse(jwkStr);
     return await importJWK(jwk, "RS256");
   }
-  throw new Error("Missing private key: defina LTI_TOOL_PRIVATE_KEY_PEM (PEM PKCS#8) ou LTI_TOOL_PRIVATE_KEY_JWK.");
+  throw new Error(
+    "Missing private key: defina LTI_TOOL_PRIVATE_KEY_PEM (PEM PKCS#8) ou LTI_TOOL_PRIVATE_KEY_JWK."
+  );
 }
 
 // util para montar origin da sua app (ex.: https://canvas-chat-gpt.vercel.app)
@@ -60,10 +64,10 @@ export default async function handler(req, res) {
       const raw = await readBody(req);
       const p = new URLSearchParams(raw);
       id_token = p.get("id_token");
-      state    = p.get("state");
+      state = p.get("state");
     } else {
       id_token = req.body?.id_token;
-      state    = req.body?.state;
+      state = req.body?.state;
     }
     if (!id_token) return res.status(400).send("missing id_token");
 
@@ -75,7 +79,7 @@ export default async function handler(req, res) {
     // verifica id_token do Canvas (LTI 1.3)
     const jwks = createRemoteJWKSet(new URL(process.env.LTI_JWKS_ENDPOINT));
     const { payload } = await jwtVerify(id_token, jwks, {
-      issuer:   process.env.LTI_ISSUER,
+      issuer: process.env.LTI_ISSUER,
       audience: process.env.LTI_CLIENT_ID,
     });
 
@@ -85,13 +89,14 @@ export default async function handler(req, res) {
     }
 
     // identifica aluno -> hash estável
-    const rawId = (payload.email && String(payload.email)) || String(payload.sub);
-    const norm  = rawId.trim().toLowerCase();
+    const rawId =
+      (payload.email && String(payload.email)) || String(payload.sub);
+    const norm = rawId.trim().toLowerCase();
     const userHash = createHash("sha256").update(norm, "utf8").digest("hex");
 
     // grava cookie (quando 3rd-party cookies permitidos)
-    const setUser   = `lti_user=${userHash}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`; // 30 dias
-    const clearSt   = `lti_state=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
+    const setUser = `lti_user=${userHash}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`; // 30 dias
+    const clearSt = `lti_state=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
     const clearNonc = `lti_nonce=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
     res.setHeader("Set-Cookie", [setUser, clearSt, clearNonc]);
 
@@ -99,19 +104,24 @@ export default async function handler(req, res) {
     const t = await makeUserToken(userHash);
 
     // --------------- Deep Linking? ---------------
-    const dl = payload["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"];
+    const dl =
+      payload[
+        "https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"
+      ];
     if (dl && dl.deep_link_return_url) {
       const privateKey = await getPrivateKey();
       const kid = process.env.LTI_TOOL_KID;
       const now = Math.floor(Date.now() / 1000);
 
-      // "iss" do Tool no deep link response (pode ser o origin da sua app)
-      const toolIssuer =
-        process.env.TOOL_ISSUER ||
-        appOriginFromReq(req);
+      // Canvas espera no deep-link response:
+      //   iss = client_id da ferramenta
+      //   sub = client_id da ferramenta
+      //   aud = issuer da plataforma (Canvas)
+      const clientId = process.env.LTI_CLIENT_ID;
+      const platformIssuer = process.env.LTI_ISSUER || payload.iss;
 
-      const aud = payload.iss; // issuer do Canvas
-      const deploymentId = payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
+      const deploymentId =
+        payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
 
       // URL que o item inserido vai abrir quando clicado no Canvas
       const targetUrl =
@@ -127,16 +137,27 @@ export default async function handler(req, res) {
         },
       ];
 
+      // log pra debug na Vercel
+      console.log("DEEPLINK building JWT", {
+        iss: clientId,
+        sub: clientId,
+        aud: platformIssuer,
+        returnUrl: dl.deep_link_return_url,
+      });
+
       const deepLinkJwt = await new SignJWT({
         // claims IMS para deep link
-        "https://purl.imsglobal.org/spec/lti-dl/claim/content_items": contentItems,
+        "https://purl.imsglobal.org/spec/lti-dl/claim/content_items":
+          contentItems,
         "https://purl.imsglobal.org/spec/lti-dl/claim/version": "1.3.0",
-        "https://purl.imsglobal.org/spec/lti-dl/claim/msg": "Item adicionado com sucesso",
+        "https://purl.imsglobal.org/spec/lti-dl/claim/msg":
+          "Item adicionado com sucesso",
         "https://purl.imsglobal.org/spec/lti/claim/deployment_id": deploymentId,
       })
         .setProtectedHeader({ alg: "RS256", kid })
-        .setIssuer(toolIssuer)
-        .setAudience(aud)
+        .setIssuer(clientId) // iss = Client ID
+        .setSubject(clientId) // sub = Client ID
+        .setAudience(platformIssuer) // aud = issuer do Canvas
         .setJti(randomUUID())
         .setIssuedAt(now)
         .setExpirationTime(now + 300) // 5 minutos
