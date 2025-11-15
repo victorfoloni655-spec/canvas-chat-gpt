@@ -130,13 +130,16 @@ export default async function handler(req, res) {
 
       // conteúdo padrão: um "link"
       const contentItems = [
-        {
-          type: "link",
-          title: "Chat do curso (GPT)",
-          url: targetUrl,
-        },
-      ];
-
+  {
+    type: "ltiResourceLink",
+    title: "Chat do curso (GPT)",
+    url: targetUrl,
+    // dica pro Canvas: abrir em iframe dentro da página
+    presentation: {
+      documentTarget: "iframe",
+    },
+  },
+];
       // log pra debug na Vercel
       console.log("DEEPLINK building JWT", {
         iss: clientId,
