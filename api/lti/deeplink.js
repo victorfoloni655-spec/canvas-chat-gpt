@@ -105,11 +105,13 @@ export default async function handler(req, res) {
     const kid = process.env.LTI_TOOL_KID;
     const now = Math.floor(Date.now() / 1000);
 
-    // 🔴 AJUSTE IMPORTANTE:
-    // Para o Canvas, o "iss" do JWT de Deep Link deve ser o CLIENT_ID da ferramenta.
-    const toolIssuer = process.env.LTI_CLIENT_ID;
-    // O "aud" deve ser o issuer da plataforma (Canvas).
-    const aud = process.env.LTI_ISSUER || payload.iss;
+    // IMPORTANTE:
+    // Para o Canvas, o JWT de Deep Link deve ter:
+    //   iss = client_id da ferramenta
+    //   sub = client_id da ferramenta
+    //   aud = issuer do Canvas (https://canvas.instructure.com)
+    const clientId = process.env.LTI_CLIENT_ID;
+    const platformIssuer = process.env.LTI_ISSUER || payload.iss;
 
     const deploymentId =
       payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
@@ -126,6 +128,14 @@ export default async function handler(req, res) {
       },
     ];
 
+    // só pra depuração (se quiser olhar depois nos logs da Vercel):
+    console.log("DEEPLINK building JWT", {
+      iss: clientId,
+      sub: clientId,
+      aud: platformIssuer,
+      returnUrl: dl.deep_link_return_url,
+    });
+
     const deepLinkJwt = await new SignJWT({
       "https://purl.imsglobal.org/spec/lti-dl/claim/content_items": contentItems,
       "https://purl.imsglobal.org/spec/lti-dl/claim/version": "1.3.0",
@@ -134,8 +144,9 @@ export default async function handler(req, res) {
       "https://purl.imsglobal.org/spec/lti/claim/deployment_id": deploymentId,
     })
       .setProtectedHeader({ alg: "RS256", kid })
-      .setIssuer(toolIssuer) // agora = LTI_CLIENT_ID
-      .setAudience(aud) // agora = LTI_ISSUER/payload.iss (Canvas)
+      .setIssuer(clientId) // iss = Client ID
+      .setSubject(clientId) // sub = Client ID
+      .setAudience(platformIssuer) // aud = issuer do Canvas
       .setJti(randomUUID())
       .setIssuedAt(now)
       .setExpirationTime(now + 300)
