@@ -120,14 +120,18 @@ export default async function handler(req, res) {
       process.env.LTI_REDIRECT_TARGET ||
       `${appOriginFromReq(req)}/?t=${encodeURIComponent(t)}`;
 
-    const contentItems = [
-      {
-        type: "link",
-        title: "Chat do curso (GPT)",
-        url: targetUrl,
-      },
-    ];
-
+        const contentItems = [
+  {
+    type: "ltiResourceLink",
+    title: "Chat do curso (GPT)",
+    url: targetUrl,
+    // dica pro Canvas: abrir em iframe dentro da página
+    presentation: {
+      documentTarget: "iframe",
+    },
+  },
+];
+    
     // só pra depuração (se quiser olhar depois nos logs da Vercel):
     console.log("DEEPLINK building JWT", {
       iss: clientId,
