@@ -29,13 +29,13 @@
   }
 
   .wrap {
-  width: 100%;
-  max-width: 1100px;      /* mais largo no desktop */
-  margin: 0 auto;
-  padding: 24px 24px 32px;
-  height: 100%;
-  display: flex;
-}
+    width: 100%;
+    max-width: 1100px;      /* mais largo no desktop */
+    margin: 0 auto;
+    padding: 24px 24px 32px;
+    height: 100%;
+    display: flex;
+  }
 
   .card {
     background: var(--card);
@@ -217,15 +217,16 @@
       </div>
       <div id="chat" class="chat"></div>
       <div class="footer">
-        <input id="input" placeholder="ask a question..." autocomplete="off" autocapitalize="sentences" />
+        <input id="input" placeholder="Ask your questions..." autocomplete="off" autocapitalize="sentences" />
         <button id="send">Enviar</button>
       </div>
     </div>
   </div>
 
 <script>
-const CHAT_URL  = '/api/chat';
-const QUOTA_URL = '/api/quota';
+const CHAT_URL    = '/api/chat';
+const QUOTA_URL   = '/api/quota';
+const HISTORY_URL = '/api/history';
 
 const chat  = document.getElementById('chat');
 const input = document.getElementById('input');
@@ -288,6 +289,36 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
+/* ---------------- HISTÓRICO ---------------- */
+async function loadHistory() {
+  try {
+    const t = getToken();
+    const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
+      // se 401 ou outro erro, só não mostra histórico
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    // desenha as mensagens antigas na tela (mais antigas primeiro)
+    items.forEach(m => {
+      if (!m || typeof m.content !== 'string') return;
+      const who = m.role === 'user' ? 'user' : 'bot';
+      addMsg(m.content, who);
+    });
+  } catch (err) {
+    console.error('Erro ao carregar histórico:', err);
+  }
+}
+
 /* ---------------- QUOTA ---------------- */
 async function atualizarQuota(){
   try {
@@ -295,94 +326,4 @@ async function atualizarQuota(){
     const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
     const r = await fetch(url, { credentials: 'include' });
     if (!r.ok) {
-      if (r.status === 401) { badge.textContent = 'entre pelo Canvas'; return; }
-      throw new Error('quota not ok');
-    }
-    const { remaining, limit } = await r.json();
-    badge.textContent = `Restantes: ${remaining} / ${limit}`;
-    if (remaining <= 20) {
-      badge.style.background = '#fff7ed';
-      badge.style.color = '#9a3412';
-    } else {
-      badge.style.background = '#f1f5f9';
-      badge.style.color = '#0f172a';
-    }
-  } catch {
-    badge.textContent = 'quota indisponível';
-  }
-}
-
-/* ---------------- SEND ---------------- */
-async function send(){
-  const text = input.value.trim();
-  if(!text) return;
-  addMsg(text, 'user');
-  input.value = '';
-  btn.disabled = true;
-
-  messages.push({ role: "user", content: text });
-
-  let data;
-  try {
-    const t = getToken();
-    const body = { messages };
-    if (t) body.t = t; // envia token de fallback no body
-
-    const res = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      credentials: "include",
-      body: JSON.stringify(body)
-    });
-
-    if (res.status === 429) {
-      const j = await res.json().catch(() => ({}));
-      addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
-      if (Array.isArray(j.packages) && j.packages.length > 0) addCTAPackages(j.packages);
-      btn.disabled = false;
-      await atualizarQuota();
-      return;
-    }
-
-    if(!res.ok){
-      const j = await res.json().catch(() => ({}));
-      console.error('Falha /api/chat', res.status, j);
-      addMsg("Erro no servidor. Tente novamente.", 'bot');
-      btn.disabled = false;
-      return;
-    }
-
-    data = await res.json();
-  } catch (err) {
-    console.error('Erro de rede /api/chat:', err);
-    addMsg("Erro de rede. Tente novamente.", 'bot');
-    btn.disabled = false;
-    return;
-  }
-
-  const reply = data.reply || "(sem conteúdo)";
-  addMsg(reply, 'bot');
-  messages.push({ role: "assistant", content: reply });
-
-  btn.disabled = false;
-  atualizarQuota();
-}
-
-btn.onclick = send;
-input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
-
-/* ---------- Comportamento simples no foco do input (mobile) ---------- */
-input.addEventListener('focus', () => {
-  setTimeout(() => {
-    chat.scrollTop = chat.scrollHeight;
-  }, 250);
-});
-
-/* ---------- Init ---------- */
-document.addEventListener('DOMContentLoaded', () => {
-  captureTokenFromURL();   // pega ?t=... (se vier)
-  atualizarQuota();
-});
-</script>
-</body>
-</html>
+      if (r.status === 401) { badge.textContent = 'entre pelo Canvas
