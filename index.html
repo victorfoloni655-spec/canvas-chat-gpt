@@ -30,7 +30,7 @@
 
   .wrap {
     width: 100%;
-    max-width: 1100px;      /* mais largo no desktop */
+    max-width: 1100px;
     margin: 0 auto;
     padding: 24px 24px 32px;
     height: 100%;
@@ -46,7 +46,7 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    min-height: 0; /* importante pra funcionar bem em iframe */
+    min-height: 0;
   }
 
   .header {
@@ -86,7 +86,6 @@
     white-space: nowrap;
   }
 
-  /* ----- abas (Chat / Speaking) ----- */
   .tabs {
     display: flex;
     border-bottom: 1px solid var(--border);
@@ -123,7 +122,6 @@
     display: flex;
   }
 
-  /* ----- chat ----- */
   .chat {
     padding: 16px;
     display: flex;
@@ -173,7 +171,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 12px 10px;
-    font-size: 16px; /* >=16px evita zoom no iOS */
+    font-size: 16px;
     min-width: 0;
   }
 
@@ -193,7 +191,6 @@
     cursor: not-allowed;
   }
 
-  /* CTAs de upgrade */
   .cta-wrap {
     display: flex;
     flex-wrap: wrap;
@@ -218,7 +215,6 @@
     filter: brightness(0.95);
   }
 
-  /* ----- speaking lab ----- */
   .speaking-wrap {
     padding: 16px;
     display: flex;
@@ -272,7 +268,6 @@
     margin-top: 8px;
   }
 
-  /* Ajustes para telas menores (mobile) */
   @media (max-width: 600px) {
     .wrap {
       padding: 8px;
@@ -308,13 +303,11 @@
         <div id="quota-badge" class="badge">carregando…</div>
       </div>
 
-      <!-- abas -->
       <div class="tabs">
         <button id="tab-chat" class="tab-btn active">Chat</button>
         <button id="tab-speaking" class="tab-btn">Speaking Lab</button>
       </div>
 
-      <!-- painel CHAT -->
       <div id="panel-chat" class="panel active">
         <div id="chat" class="chat"></div>
         <div class="footer">
@@ -323,7 +316,6 @@
         </div>
       </div>
 
-      <!-- painel SPEAKING -->
       <div id="panel-speaking" class="panel">
         <div class="speaking-wrap">
           <div class="speaking-card">
@@ -335,7 +327,8 @@
             Ao terminar a gravação, o sistema vai:
             <br>• transcrever aproximadamente o que você falou;
             <br>• mostrar a frase correta em inglês;
-            <br>• dar uma dica rápida em português sobre a pronúncia.
+            <br>• dar uma dica rápida em português sobre a pronúncia;
+            <br>• e tocar a frase corrigida em voz de IA.
           </div>
 
           <div class="speaking-card">
@@ -347,6 +340,7 @@
 Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
             </div>
             <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
+            <audio id="speech-tts" class="speaking-audio" controls style="display:none"></audio>
           </div>
         </div>
       </div>
@@ -359,17 +353,14 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
   const QUOTA_URL    = '/api/quota';
   const SPEAKING_URL = '/api/speaking';
 
-  // histórico salvo no navegador do aluno
   const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
 
-  /* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
   function captureTokenFromURL(){
     try {
       const u = new URL(window.location.href);
       const t = u.searchParams.get('t');
       if (t) {
         localStorage.setItem('lti_token', t);
-        // remove ?t da URL sem recarregar
         u.searchParams.delete('t');
         window.history.replaceState({}, '', u.toString());
       }
@@ -409,13 +400,13 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     const recStop     = document.getElementById('rec-stop');
     const speechStatus= document.getElementById('speech-status');
     const speechAudio = document.getElementById('speech-playback');
+    const speechTTS   = document.getElementById('speech-tts');
 
     if (!chat || !input || !btn || !badge) {
       console.error('Elementos do chat não encontrados');
       return;
     }
 
-    // estado da conversa que vai para a API
     const messages = [...SYSTEM_MESSAGES];
 
     function addMsg(text, who){
@@ -426,7 +417,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       chat.scrollTop = chat.scrollHeight;
     }
 
-    // ---- histórico local (navegador) ----
     function saveLocalHistory(role, content) {
       try {
         const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
@@ -437,7 +427,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         }
         arr.push({ role, content, ts: Date.now() });
         if (arr.length > 200) {
-          arr = arr.slice(arr.length - 200); // limita tamanho
+          arr = arr.slice(arr.length - 200);
         }
         localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(arr));
       } catch (e) {
@@ -456,7 +446,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
           if (!m || typeof m.content !== 'string') return;
           const who = m.role === 'user' ? 'user' : 'bot';
           addMsg(m.content, who);
-          // hidrata mensagens pra IA ter contexto também
           const role = who === 'user' ? 'user' : 'assistant';
           messages.push({ role, content: m.content });
         });
@@ -465,7 +454,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       }
     }
 
-    /* ---------------- QUOTA ---------------- */
     async function atualizarQuota(){
       try {
         const t = getToken();
@@ -493,7 +481,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       }
     }
 
-    /* ---------------- SEND (chat texto) ---------------- */
     async function send(){
       const text = input.value.trim();
       if(!text) return;
@@ -509,7 +496,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       try {
         const t = getToken();
         const body = { messages };
-        if (t) body.t = t; // envia token de fallback no body
+        if (t) body.t = t;
 
         const res = await fetch(CHAT_URL, {
           method: "POST",
@@ -570,7 +557,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       atualizarQuota();
     }
 
-    // handlers do chat
     btn.addEventListener('click', send);
     input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
 
@@ -580,7 +566,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       }, 250);
     });
 
-    // ---------- abas (Chat / Speaking) ----------
     function activateTab(which) {
       if (!panelChat || !panelSpeak || !tabChat || !tabSpeaking) return;
       if (which === 'chat') {
@@ -599,14 +584,22 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     tabChat?.addEventListener('click', () => activateTab('chat'));
     tabSpeaking?.addEventListener('click', () => activateTab('speaking'));
 
-    // ---------- Speaking Lab: envia áudio para /api/speaking ----------
+    function base64ToBlob(base64, mimeType) {
+      const binary = atob(base64);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Blob([bytes], { type: mimeType || "audio/mpeg" });
+    }
+
     async function sendToSpeakingAPI(blob) {
       if (!speechStatus) return;
 
       try {
         speechStatus.textContent = 'Enviando áudio para correção...';
 
-        // converte Blob -> base64
         const arrayBuffer = await blob.arrayBuffer();
         let binary = '';
         const bytes = new Uint8Array(arrayBuffer);
@@ -644,7 +637,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         }
 
         const data = await res.json().catch(() => ({}));
-        const { transcript, correct_sentence, feedback_text } = data || {};
+        const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
 
         let msg = '';
         if (transcript) {
@@ -658,13 +651,19 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         }
 
         speechStatus.textContent = msg || 'Correção recebida, mas vazia.';
+
+        if (audioBase64 && speechTTS) {
+          const ttsBlob = base64ToBlob(audioBase64, "audio/mpeg");
+          const ttsUrl  = URL.createObjectURL(ttsBlob);
+          speechTTS.src = ttsUrl;
+          speechTTS.style.display = 'block';
+        }
       } catch (err) {
         console.error('Erro ao enviar áudio para /api/speaking:', err);
         speechStatus.textContent = 'Erro de rede ao enviar o áudio.';
       }
     }
 
-    // ---------- gravação local ----------
     let mediaRecorder = null;
     let chunks = [];
     let isRecording = false;
@@ -694,9 +693,12 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
             const url = URL.createObjectURL(blob);
             speechAudio.src = url;
             speechAudio.style.display = 'block';
+            if (speechTTS) {
+              speechTTS.style.display = 'none';
+              speechTTS.removeAttribute('src');
+            }
             speechStatus.textContent = 'Gravação concluída. Enviando para a IA corrigir sua pronúncia...';
 
-            // envia para API de speaking
             sendToSpeakingAPI(blob);
           } catch (err) {
             console.error('Erro ao processar áudio gravado:', err);
@@ -727,9 +729,8 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     recStart?.addEventListener('click', startRecording);
     recStop?.addEventListener('click', stopRecording);
 
-    // init fluxo
     captureTokenFromURL();
-    loadLocalHistory();   // desenha histórico salvo no navegador
+    loadLocalHistory();
     atualizarQuota();
   }
 
