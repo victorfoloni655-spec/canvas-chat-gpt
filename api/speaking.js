@@ -1,21 +1,22 @@
 // /api/speaking.js
 // Recebe áudio (base64), identifica o aluno via LTI, controla minutos/mês em Redis,
-// transcreve com gpt-4o-mini-transcribe e gera feedback de pronúncia com gpt-4o-mini.
+// transcreve com gpt-4o-mini-transcribe, gera feedback de pronúncia com gpt-4o-mini
+// e ainda gera um áudio (TTS) com a frase corrigida + dica.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
 
-const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
-const OPENAI_TEXT_MODEL  = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const TRANSCRIBE_MODEL   = "gpt-4o-mini-transcribe";
+const OPENAI_API_KEY    = process.env.OPENAI_API_KEY;
+const OPENAI_TEXT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const TRANSCRIBE_MODEL  = "gpt-4o-mini-transcribe";
+const TTS_MODEL         = process.env.TTS_MODEL || "gpt-4o-mini-tts";
 
 // ------- LIMITE DE ÁUDIO (MINUTOS / MÊS) -------
-const SPEAKING_PREFIX         = process.env.SPEAKING_PREFIX || "speaking";
-const SPEAKING_MINUTES_LIMIT  = Number(process.env.SPEAKING_MINUTES_LIMIT || 20);
-const SPEAKING_SECONDS_LIMIT  = SPEAKING_MINUTES_LIMIT * 60; // 20 min -> 1200s
+const SPEAKING_PREFIX        = process.env.SPEAKING_PREFIX || "speaking";
+const SPEAKING_MINUTES_LIMIT = Number(process.env.SPEAKING_MINUTES_LIMIT || 20);
+const SPEAKING_SECONDS_LIMIT = SPEAKING_MINUTES_LIMIT * 60; // 20 min -> 1200s
 
 // Cada gravação, por enquanto, conta como 30 segundos.
-// Assim, com 20 minutos/mês, o aluno tem ~40 gravações.
 const ESTIMATED_SECONDS_PER_RECORDING = 30;
 
 // Redis (mesma config dos outros endpoints)
@@ -67,7 +68,6 @@ async function addSecondsAndCheck(userId, secondsToAdd) {
   const key = monthKey(userId);
   const add = Math.max(1, Math.round(secondsToAdd || 0)); // garante >= 1s
 
-  // INCRBY no Redis
   const usedSeconds = await redis.incrby(key, add);
 
   // primeira vez no mês: define expiração pro 1º dia do próximo mês (UTC)
@@ -92,7 +92,6 @@ async function transcribeAudioFromBase64(base64) {
 
   const buffer = Buffer.from(base64, "base64");
 
-  // Node 18+ / Vercel: Blob e FormData disponíveis globalmente
   const blob = new Blob([buffer], { type: "audio/webm" });
   const formData = new FormData();
   formData.append("file", blob, "audio.webm");
@@ -112,11 +111,10 @@ async function transcribeAudioFromBase64(base64) {
   }
 
   const data = await resp.json();
-  // campo padrão da API é "text"
   return data.text || "";
 }
 
-// ---------- OpenAI: feedback de pronúncia ----------
+// ---------- OpenAI: feedback de pronúncia (texto) ----------
 
 async function buildFeedbackFromTranscript(transcript) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
@@ -170,12 +168,10 @@ Transcrição aproximada do que o aluno falou:
   const data = await resp.json();
   const content = data?.choices?.[0]?.message?.content?.trim() || "";
 
-  // tenta interpretar como JSON
   let parsed;
   try {
     parsed = JSON.parse(content);
   } catch {
-    // fallback: manda tudo como feedback bruto
     return {
       correct_sentence: null,
       feedback_text: content || "Não foi possível interpretar a resposta da IA.",
@@ -186,6 +182,35 @@ Transcrição aproximada do que o aluno falou:
     correct_sentence: parsed.correct_sentence || null,
     feedback_text: parsed.feedback_text || "",
   };
+}
+
+// ---------- OpenAI: gerar áudio (TTS) ----------
+
+async function generateSpeechAudio(text) {
+  if (!text) return null;
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
+
+  const resp = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      voice: "alloy",
+      input: text,
+    }),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Erro no TTS (${resp.status}): ${txt}`);
+  }
+
+  const arrayBuffer = await resp.arrayBuffer();
+  const buf = Buffer.from(arrayBuffer);
+  return buf.toString("base64"); // áudio em base64 (mp3)
 }
 
 // ---------- handler principal ----------
@@ -241,8 +266,26 @@ export default async function handler(req, res) {
     // 1) Transcreve o áudio
     const transcript = await transcribeAudioFromBase64(audio);
 
-    // 2) Gera correção + feedback
+    // 2) Gera correção + feedback (texto)
     const feedback = await buildFeedbackFromTranscript(transcript || "");
+
+    // 3) Monta texto para TTS (inglês)
+    const parts = [];
+    if (feedback.correct_sentence) {
+      parts.push(`The correct sentence is: ${feedback.correct_sentence}`);
+    }
+    if (feedback.feedback_text) {
+      parts.push(feedback.feedback_text);
+    }
+    const speechText = parts.join(". ");
+
+    let audioBase64 = null;
+    try {
+      audioBase64 = await generateSpeechAudio(speechText);
+    } catch (err) {
+      console.error("Erro ao gerar TTS:", err);
+      audioBase64 = null;
+    }
 
     return res.status(200).json({
       user: userId,
@@ -251,6 +294,7 @@ export default async function handler(req, res) {
       feedback_text: feedback.feedback_text,
       usedSeconds,
       limitSeconds: SPEAKING_SECONDS_LIMIT,
+      audioBase64, // áudio da IA em base64 (mp3)
     });
   } catch (e) {
     console.error("SPEAKING error:", e);
