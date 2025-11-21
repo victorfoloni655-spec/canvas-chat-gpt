@@ -12,6 +12,9 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
 
+// prefixo para histórico (pode configurar em env: HISTORY_PREFIX=history_gpt)
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+
 // Links de checkout (opcionais)
 const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
@@ -34,6 +37,11 @@ function monthKey(userId) {
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
+// chave do histórico
+function historyKey(userId) {
+  return `${HISTORY_PREFIX}:${userId}`;
+}
+
 // incrementa e expira no 1º dia do próximo mês (UTC)
 async function incrMonthlyAndCheck(key, limit) {
   const used = await redis.incr(key);
@@ -52,6 +60,25 @@ async function getUserIdFromToken(t) {
     return payload?.sub || null; // sub = userId
   } catch {
     return null;
+  }
+}
+
+// salva uma entrada no histórico (não quebra o chat se falhar)
+async function appendHistory(userId, role, content) {
+  try {
+    if (!userId || !content) return;
+    const key = historyKey(userId);
+    const entry = JSON.stringify({
+      role,
+      content,
+      ts: Date.now(),
+    });
+    // guarda as MAIS recentes primeiro
+    await redis.lpush(key, entry);
+    // mantém só as últimas 100 entradas
+    await redis.ltrim(key, 0, 99);
+  } catch (e) {
+    console.error("HISTORY save error:", e);
   }
 }
 
@@ -76,16 +103,34 @@ async function callOpenAI(messages) {
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
+// leitor simples de JSON
+async function readJson(req) {
+  const raw = await new Promise((resolve) => {
+    let d = "";
+    req.on("data", (c) => (d += c));
+    req.on("end", () => resolve(d));
+  });
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+
 // ====== HANDLER ======
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
 
     const body = await readJson(req);
     const { messages, t } = body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
+
+    // pega a última mensagem do aluno (role: "user") para salvar no histórico
+    const lastUserMsg = [...messages]
+      .reverse()
+      .find(m => m && m.role === "user" && typeof m.content === "string")
+      ?.content || null;
 
     // Identidade do aluno: cookie LTI -> token 't' -> (recusa sem identidade)
     const cookies = parseCookies(req.headers.cookie || "");
@@ -124,21 +169,18 @@ export default async function handler(req, res) {
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
+
+    // Salva histórico (pergunta do aluno + resposta da IA)
+    if (lastUserMsg) {
+      await appendHistory(counterId, "user", lastUserMsg);
+    }
+    await appendHistory(counterId, "assistant", reply);
+
     return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
   } catch (e) {
     console.error("CHAT error:", e);
     return res.status(500).json({ error: e?.message || "internal error" });
   }
-}
-
-// leitor simples de JSON
-async function readJson(req) {
-  const raw = await new Promise((resolve) => {
-    let d = "";
-    req.on("data", (c) => (d += c));
-    req.on("end", () => resolve(d));
-  });
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
 export const config = { api: { bodyParser: false } };
