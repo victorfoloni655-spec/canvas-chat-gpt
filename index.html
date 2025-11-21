@@ -225,9 +225,11 @@
 
 <script>
 (() => {
-  const CHAT_URL    = '/api/chat';
-  const QUOTA_URL   = '/api/quota';
-  const HISTORY_URL = '/api/history';
+  const CHAT_URL  = '/api/chat';
+  const QUOTA_URL = '/api/quota';
+
+  // histórico salvo no navegador do aluno
+  const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
 
   /* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
   function captureTokenFromURL(){
@@ -272,7 +274,7 @@
       return;
     }
 
-    // estado da conversa desta sessão
+    // estado da conversa que vai para a API
     const messages = [...SYSTEM_MESSAGES];
 
     function addMsg(text, who){
@@ -283,59 +285,42 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
-    function addCTAPackages(packages){
-      const el = document.createElement('div');
-      el.className = 'msg bot';
-
-      const txt = document.createElement('div');
-      txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
-
-      const wrap = document.createElement('div');
-      wrap.className = 'cta-wrap';
-
-      (packages || []).forEach(p => {
-        if (!p?.url) return;
-        const a = document.createElement('a');
-        a.className = 'cta-btn';
-        a.href = p.url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.textContent = p.label || 'Comprar';
-        wrap.appendChild(a);
-      });
-
-      el.appendChild(txt);
-      el.appendChild(wrap);
-      chat.appendChild(el);
-      chat.scrollTop = chat.scrollHeight;
+    // ---- histórico local (navegador) ----
+    function saveLocalHistory(role, content) {
+      try {
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        let arr = [];
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) arr = parsed;
+        }
+        arr.push({ role, content, ts: Date.now() });
+        if (arr.length > 200) {
+          arr = arr.slice(arr.length - 200); // limita tamanho
+        }
+        localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(arr));
+      } catch (e) {
+        console.error('Erro ao salvar histórico local:', e);
+      }
     }
 
-    /* ---------------- HISTÓRICO ---------------- */
-    async function loadHistory() {
+    function loadLocalHistory() {
       try {
-        const t = getToken();
-        const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return;
 
-        const res = await fetch(url, {
-          method: 'GET',
-          credentials: 'include',
-        });
-
-        if (!res.ok) {
-          // 401 ou outro erro: só não mostra histórico
-          return;
-        }
-
-        const data = await res.json().catch(() => ({}));
-        const items = Array.isArray(data.items) ? data.items : [];
-
-        items.forEach(m => {
+        arr.forEach(m => {
           if (!m || typeof m.content !== 'string') return;
           const who = m.role === 'user' ? 'user' : 'bot';
           addMsg(m.content, who);
+          // hidrata mensagens pra IA ter contexto também
+          const role = who === 'user' ? 'user' : 'assistant';
+          messages.push({ role, content: m.content });
         });
-      } catch (err) {
-        console.error('Erro ao carregar histórico:', err);
+      } catch (e) {
+        console.error('Erro ao carregar histórico local:', e);
       }
     }
 
@@ -373,6 +358,7 @@
       if(!text) return;
 
       addMsg(text, 'user');
+      saveLocalHistory('user', text);
       input.value = '';
       btn.disabled = true;
 
@@ -395,7 +381,23 @@
           const j = await res.json().catch(() => ({}));
           addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
           if (Array.isArray(j.packages) && j.packages.length > 0) {
-            addCTAPackages(j.packages);
+            const el = document.createElement('div');
+            el.className = 'msg bot';
+            const wrap = document.createElement('div');
+            wrap.className = 'cta-wrap';
+            j.packages.forEach(p => {
+              if (!p?.url) return;
+              const a = document.createElement('a');
+              a.className = 'cta-btn';
+              a.href = p.url;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              a.textContent = p.label || 'Comprar';
+              wrap.appendChild(a);
+            });
+            el.appendChild(wrap);
+            chat.appendChild(el);
+            chat.scrollTop = chat.scrollHeight;
           }
           btn.disabled = false;
           await atualizarQuota();
@@ -420,6 +422,7 @@
 
       const reply = data.reply || "(sem conteúdo)";
       addMsg(reply, 'bot');
+      saveLocalHistory('assistant', reply);
       messages.push({ role: "assistant", content: reply });
 
       btn.disabled = false;
@@ -438,7 +441,7 @@
 
     // init fluxo
     captureTokenFromURL();
-    await loadHistory();
+    loadLocalHistory();   // desenha histórico salvo no navegador
     atualizarQuota();
   }
 
