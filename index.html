@@ -86,6 +86,44 @@
     white-space: nowrap;
   }
 
+  /* ----- abas (Chat / Speaking) ----- */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  .tab-btn {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 500;
+    border-radius: 999px;
+    margin: 6px 4px;
+  }
+
+  .tab-btn.active {
+    background: rgba(129,216,208,0.12);
+    color: var(--text);
+    border: 1px solid var(--tiffany);
+  }
+
+  .panel {
+    display: none;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .panel.active {
+    display: flex;
+  }
+
+  /* ----- chat ----- */
   .chat {
     padding: 16px;
     display: flex;
@@ -180,6 +218,57 @@
     filter: brightness(0.95);
   }
 
+  /* ----- speaking lab ----- */
+  .speaking-wrap {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .speaking-card {
+    background: #0d1117;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .speaking-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .speaking-btn {
+    background: rgba(129,216,208,.15);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 8px 14px;
+    border: 1px solid var(--tiffany);
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .speaking-btn:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+  }
+
+  .speaking-status {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .speaking-audio {
+    margin-top: 8px;
+  }
+
   /* Ajustes para telas menores (mobile) */
   @media (max-width: 600px) {
     .wrap {
@@ -215,10 +304,45 @@
         </div>
         <div id="quota-badge" class="badge">carregando…</div>
       </div>
-      <div id="chat" class="chat"></div>
-      <div class="footer">
-        <input id="input" placeholder="Ask your questions..." autocomplete="off" autocapitalize="sentences" />
-        <button id="send">Enviar</button>
+
+      <!-- abas -->
+      <div class="tabs">
+        <button id="tab-chat" class="tab-btn active">Chat</button>
+        <button id="tab-speaking" class="tab-btn">Speaking Lab</button>
+      </div>
+
+      <!-- painel CHAT -->
+      <div id="panel-chat" class="panel active">
+        <div id="chat" class="chat"></div>
+        <div class="footer">
+          <input id="input" placeholder="Ask your questions..." autocomplete="off" autocapitalize="sentences" />
+          <button id="send">Enviar</button>
+        </div>
+      </div>
+
+      <!-- painel SPEAKING -->
+      <div id="panel-speaking" class="panel">
+        <div class="speaking-wrap">
+          <div class="speaking-card">
+            <strong>Speaking Lab (beta)</strong><br>
+            Grave frases em inglês para praticar sua pronúncia.
+            <br><br>
+            Exemplo: <em>"Do you speak Spanish, my friend?"</em><br>
+            No futuro, esta área vai enviar seu áudio para a IA, corrigir a frase e devolver um feedback em texto e voz.
+            Por enquanto, é um teste de gravação local para checar se o microfone funciona dentro do Canvas.
+          </div>
+
+          <div class="speaking-card">
+            <div class="speaking-actions">
+              <button id="rec-start" class="speaking-btn">🎙️ Gravar</button>
+              <button id="rec-stop" class="speaking-btn" disabled>⏹️ Parar</button>
+            </div>
+            <div id="speech-status" class="speaking-status">
+              Pronto para gravar. Quando terminar, você poderá ouvir sua própria gravação.
+            </div>
+            <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -264,10 +388,20 @@
   ];
 
   async function init() {
-    const chat  = document.getElementById('chat');
-    const input = document.getElementById('input');
-    const btn   = document.getElementById('send');
-    const badge = document.getElementById('quota-badge');
+    const chat        = document.getElementById('chat');
+    const input       = document.getElementById('input');
+    const btn         = document.getElementById('send');
+    const badge       = document.getElementById('quota-badge');
+
+    const tabChat     = document.getElementById('tab-chat');
+    const tabSpeaking = document.getElementById('tab-speaking');
+    const panelChat   = document.getElementById('panel-chat');
+    const panelSpeak  = document.getElementById('panel-speaking');
+
+    const recStart    = document.getElementById('rec-start');
+    const recStop     = document.getElementById('rec-stop');
+    const speechStatus= document.getElementById('speech-status');
+    const speechAudio = document.getElementById('speech-playback');
 
     if (!chat || !input || !btn || !badge) {
       console.error('Elementos do chat não encontrados');
@@ -352,7 +486,7 @@
       }
     }
 
-    /* ---------------- SEND ---------------- */
+    /* ---------------- SEND (chat texto) ---------------- */
     async function send(){
       const text = input.value.trim();
       if(!text) return;
@@ -429,7 +563,7 @@
       atualizarQuota();
     }
 
-    // handlers
+    // handlers do chat
     btn.addEventListener('click', send);
     input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
 
@@ -438,6 +572,86 @@
         chat.scrollTop = chat.scrollHeight;
       }, 250);
     });
+
+    // ---------- abas (Chat / Speaking) ----------
+    function activateTab(which) {
+      if (!panelChat || !panelSpeak || !tabChat || !tabSpeaking) return;
+      if (which === 'chat') {
+        panelChat.classList.add('active');
+        panelSpeak.classList.remove('active');
+        tabChat.classList.add('active');
+        tabSpeaking.classList.remove('active');
+      } else {
+        panelChat.classList.remove('active');
+        panelSpeak.classList.add('active');
+        tabChat.classList.remove('active');
+        tabSpeaking.classList.add('active');
+      }
+    }
+
+    tabChat?.addEventListener('click', () => activateTab('chat'));
+    tabSpeaking?.addEventListener('click', () => activateTab('speaking'));
+
+    // ---------- Speaking Lab: teste de gravação local ----------
+    let mediaRecorder = null;
+    let chunks = [];
+    let isRecording = false;
+
+    async function startRecording(){
+      if (!recStart || !recStop || !speechStatus || !speechAudio) return;
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          speechStatus.textContent = 'Seu navegador não suporta gravação de áudio.';
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        chunks = [];
+        isRecording = true;
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          try {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const url = URL.createObjectURL(blob);
+            speechAudio.src = url;
+            speechAudio.style.display = 'block';
+            speechStatus.textContent = 'Gravação concluída. Ouça sua pronúncia. Em breve, este áudio será enviado para a IA para correção.';
+          } catch (err) {
+            console.error('Erro ao processar áudio gravado:', err);
+            speechStatus.textContent = 'Erro ao processar a gravação.';
+          }
+        };
+
+        mediaRecorder.start();
+        speechStatus.textContent = 'Gravando... fale em inglês. Clique em Parar quando terminar.';
+        recStart.disabled = true;
+        recStop.disabled = false;
+      } catch (err) {
+        console.error('Erro ao iniciar gravação:', err);
+        speechStatus.textContent = 'Não foi possível acessar o microfone. Verifique as permissões do navegador.';
+      }
+    }
+
+    function stopRecording(){
+      if (!recStart || !recStop || !speechStatus) return;
+      if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        recStart.disabled = false;
+        recStop.disabled = true;
+        // TODO: aqui no futuro vamos enviar o blob para /api/speaking
+      }
+    }
+
+    recStart?.addEventListener('click', startRecording);
+    recStop?.addEventListener('click', stopRecording);
 
     // init fluxo
     captureTokenFromURL();
