@@ -224,106 +224,230 @@
   </div>
 
 <script>
-const CHAT_URL    = '/api/chat';
-const QUOTA_URL   = '/api/quota';
-const HISTORY_URL = '/api/history';
+(() => {
+  const CHAT_URL    = '/api/chat';
+  const QUOTA_URL   = '/api/quota';
+  const HISTORY_URL = '/api/history';
 
-const chat  = document.getElementById('chat');
-const input = document.getElementById('input');
-const btn   = document.getElementById('send');
-const badge = document.getElementById('quota-badge');
-
-/* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
-function captureTokenFromURL(){
-  const u = new URL(window.location.href);
-  const t = u.searchParams.get('t');
-  if (t) {
-    localStorage.setItem('lti_token', t);
-    // (opcional) remove ?t da URL sem recarregar
-    u.searchParams.delete('t');
-    window.history.replaceState({}, '', u.toString());
+  /* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
+  function captureTokenFromURL(){
+    try {
+      const u = new URL(window.location.href);
+      const t = u.searchParams.get('t');
+      if (t) {
+        localStorage.setItem('lti_token', t);
+        // remove ?t da URL sem recarregar
+        u.searchParams.delete('t');
+        window.history.replaceState({}, '', u.toString());
+      }
+      return t;
+    } catch {
+      return null;
+    }
   }
-  return t;
-}
-function getToken(){
-  return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
-}
 
-/* ---------------- UI helpers ---------------- */
-const messages = [
-  { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
-];
+  function getToken(){
+    try {
+      return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
+    } catch {
+      return captureTokenFromURL() || null;
+    }
+  }
 
-function addMsg(text, who){
-  const el = document.createElement('div');
-  el.className = `msg ${who}`;
-  el.textContent = text;
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
-}
+  const SYSTEM_MESSAGES = [
+    {
+      role: "system",
+      content: "Você é um tutor de inglês que vai tirar dúvidas dos alunos, seja claro e objetivo."
+    }
+  ];
 
-function addCTAPackages(packages){
-  const el = document.createElement('div');
-  el.className = 'msg bot';
+  async function init() {
+    const chat  = document.getElementById('chat');
+    const input = document.getElementById('input');
+    const btn   = document.getElementById('send');
+    const badge = document.getElementById('quota-badge');
 
-  const txt = document.createElement('div');
-  txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'cta-wrap';
-
-  (packages || []).forEach(p => {
-    if (!p?.url) return;
-    const a = document.createElement('a');
-    a.className = 'cta-btn';
-    a.href = p.url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.textContent = p.label || 'Comprar';
-    wrap.appendChild(a);
-  });
-
-  el.appendChild(txt);
-  el.appendChild(wrap);
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-/* ---------------- HISTÓRICO ---------------- */
-async function loadHistory() {
-  try {
-    const t = getToken();
-    const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
-
-    const res = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-    });
-
-    if (!res.ok) {
-      // se 401 ou outro erro, só não mostra histórico
+    if (!chat || !input || !btn || !badge) {
+      console.error('Elementos do chat não encontrados');
       return;
     }
 
-    const data = await res.json().catch(() => ({}));
-    const items = Array.isArray(data.items) ? data.items : [];
+    // estado da conversa desta sessão
+    const messages = [...SYSTEM_MESSAGES];
 
-    // desenha as mensagens antigas na tela (mais antigas primeiro)
-    items.forEach(m => {
-      if (!m || typeof m.content !== 'string') return;
-      const who = m.role === 'user' ? 'user' : 'bot';
-      addMsg(m.content, who);
+    function addMsg(text, who){
+      const el = document.createElement('div');
+      el.className = `msg ${who}`;
+      el.textContent = text;
+      chat.appendChild(el);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function addCTAPackages(packages){
+      const el = document.createElement('div');
+      el.className = 'msg bot';
+
+      const txt = document.createElement('div');
+      txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'cta-wrap';
+
+      (packages || []).forEach(p => {
+        if (!p?.url) return;
+        const a = document.createElement('a');
+        a.className = 'cta-btn';
+        a.href = p.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = p.label || 'Comprar';
+        wrap.appendChild(a);
+      });
+
+      el.appendChild(txt);
+      el.appendChild(wrap);
+      chat.appendChild(el);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    /* ---------------- HISTÓRICO ---------------- */
+    async function loadHistory() {
+      try {
+        const t = getToken();
+        const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
+
+        const res = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (!res.ok) {
+          // 401 ou outro erro: só não mostra histórico
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        const items = Array.isArray(data.items) ? data.items : [];
+
+        items.forEach(m => {
+          if (!m || typeof m.content !== 'string') return;
+          const who = m.role === 'user' ? 'user' : 'bot';
+          addMsg(m.content, who);
+        });
+      } catch (err) {
+        console.error('Erro ao carregar histórico:', err);
+      }
+    }
+
+    /* ---------------- QUOTA ---------------- */
+    async function atualizarQuota(){
+      try {
+        const t = getToken();
+        const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) {
+          if (r.status === 401) {
+            badge.textContent = 'entre pelo Canvas';
+            return;
+          }
+          throw new Error('quota not ok');
+        }
+        const { remaining, limit } = await r.json();
+        badge.textContent = `Restantes: ${remaining} / ${limit}`;
+        if (remaining <= 20) {
+          badge.style.background = '#fff7ed';
+          badge.style.color = '#9a3412';
+        } else {
+          badge.style.background = '#f1f5f9';
+          badge.style.color = '#0f172a';
+        }
+      } catch (e) {
+        console.error('Erro ao buscar quota:', e);
+        badge.textContent = 'quota indisponível';
+      }
+    }
+
+    /* ---------------- SEND ---------------- */
+    async function send(){
+      const text = input.value.trim();
+      if(!text) return;
+
+      addMsg(text, 'user');
+      input.value = '';
+      btn.disabled = true;
+
+      messages.push({ role: "user", content: text });
+
+      let data;
+      try {
+        const t = getToken();
+        const body = { messages };
+        if (t) body.t = t; // envia token de fallback no body
+
+        const res = await fetch(CHAT_URL, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          credentials: "include",
+          body: JSON.stringify(body)
+        });
+
+        if (res.status === 429) {
+          const j = await res.json().catch(() => ({}));
+          addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
+          if (Array.isArray(j.packages) && j.packages.length > 0) {
+            addCTAPackages(j.packages);
+          }
+          btn.disabled = false;
+          await atualizarQuota();
+          return;
+        }
+
+        if(!res.ok){
+          const j = await res.json().catch(() => ({}));
+          console.error('Falha /api/chat', res.status, j);
+          addMsg("Erro no servidor. Tente novamente.", 'bot');
+          btn.disabled = false;
+          return;
+        }
+
+        data = await res.json();
+      } catch (err) {
+        console.error('Erro de rede /api/chat:', err);
+        addMsg("Erro de rede. Tente novamente.", 'bot');
+        btn.disabled = false;
+        return;
+      }
+
+      const reply = data.reply || "(sem conteúdo)";
+      addMsg(reply, 'bot');
+      messages.push({ role: "assistant", content: reply });
+
+      btn.disabled = false;
+      atualizarQuota();
+    }
+
+    // handlers
+    btn.addEventListener('click', send);
+    input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
+
+    input.addEventListener('focus', () => {
+      setTimeout(() => {
+        chat.scrollTop = chat.scrollHeight;
+      }, 250);
     });
-  } catch (err) {
-    console.error('Erro ao carregar histórico:', err);
-  }
-}
 
-/* ---------------- QUOTA ---------------- */
-async function atualizarQuota(){
-  try {
-    const t = getToken();
-    const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
-    const r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) {
-      if (r.status === 401) { badge.textContent = 'entre pelo Canvas
+    // init fluxo
+    captureTokenFromURL();
+    await loadHistory();
+    atualizarQuota();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
