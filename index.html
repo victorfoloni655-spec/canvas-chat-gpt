@@ -130,8 +130,8 @@
     flex-direction: column;
     gap: 10px;
     overflow-y: auto;
-    flex: 1 1 auto;   /* ocupa o espaço entre header e footer */
-    min-height: 0;    /* ESSENCIAL pra não “estourar” dentro do flex */
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .msg {
@@ -174,7 +174,7 @@
     border-radius: 10px;
     padding: 12px 10px;
     font-size: 16px; /* >=16px evita zoom no iOS */
-    min-width: 0;    /* evita estourar no mobile */
+    min-width: 0;
   }
 
   button {
@@ -236,6 +236,7 @@
     padding: 12px 14px;
     font-size: 14px;
     color: var(--muted);
+    white-space: pre-wrap;
   }
 
   .speaking-actions {
@@ -263,6 +264,8 @@
   .speaking-status {
     font-size: 13px;
     color: var(--muted);
+    margin-top: 8px;
+    white-space: pre-wrap;
   }
 
   .speaking-audio {
@@ -324,12 +327,15 @@
       <div id="panel-speaking" class="panel">
         <div class="speaking-wrap">
           <div class="speaking-card">
-            <strong>Speaking Lab (beta)</strong><br>
-            Grave frases em inglês para praticar sua pronúncia.
+            <strong>Speaking Lab (beta)</strong>
             <br><br>
-            Exemplo: <em>"Do you speak Spanish, my friend?"</em><br>
-            No futuro, esta área vai enviar seu áudio para a IA, corrigir a frase e devolver um feedback em texto e voz.
-            Por enquanto, é um teste de gravação local para checar se o microfone funciona dentro do Canvas.
+            Grave frases em inglês para praticar sua pronúncia.
+            Exemplo: <em>"Do you speak Spanish, my friend?"</em>
+            <br><br>
+            Ao terminar a gravação, o sistema vai:
+            <br>• transcrever aproximadamente o que você falou;
+            <br>• mostrar a frase correta em inglês;
+            <br>• dar uma dica rápida em português sobre a pronúncia.
           </div>
 
           <div class="speaking-card">
@@ -338,7 +344,7 @@
               <button id="rec-stop" class="speaking-btn" disabled>⏹️ Parar</button>
             </div>
             <div id="speech-status" class="speaking-status">
-              Pronto para gravar. Quando terminar, você poderá ouvir sua própria gravação.
+Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
             </div>
             <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
           </div>
@@ -349,8 +355,9 @@
 
 <script>
 (() => {
-  const CHAT_URL  = '/api/chat';
-  const QUOTA_URL = '/api/quota';
+  const CHAT_URL     = '/api/chat';
+  const QUOTA_URL    = '/api/quota';
+  const SPEAKING_URL = '/api/speaking';
 
   // histórico salvo no navegador do aluno
   const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
@@ -592,7 +599,72 @@
     tabChat?.addEventListener('click', () => activateTab('chat'));
     tabSpeaking?.addEventListener('click', () => activateTab('speaking'));
 
-    // ---------- Speaking Lab: teste de gravação local ----------
+    // ---------- Speaking Lab: envia áudio para /api/speaking ----------
+    async function sendToSpeakingAPI(blob) {
+      if (!speechStatus) return;
+
+      try {
+        speechStatus.textContent = 'Enviando áudio para correção...';
+
+        // converte Blob -> base64
+        const arrayBuffer = await blob.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(arrayBuffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+
+        const t = getToken();
+        const payload = { audio: base64 };
+        if (t) payload.t = t;
+
+        const res = await fetch(SPEAKING_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            speechStatus.textContent = 'Abra esta atividade pelo Canvas para usar o lab de fala.';
+            return;
+          }
+          if (res.status === 429) {
+            const j = await res.json().catch(() => ({}));
+            speechStatus.textContent = (j && j.message) || 'Você atingiu o limite de prática de áudio.';
+            return;
+          }
+          const j = await res.json().catch(() => ({}));
+          console.error('Erro /api/speaking', res.status, j);
+          speechStatus.textContent = 'Erro ao enviar o áudio para correção.';
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        const { transcript, correct_sentence, feedback_text } = data || {};
+
+        let msg = '';
+        if (transcript) {
+          msg += `Você disse (aprox.): "${transcript}"\n`;
+        }
+        if (correct_sentence) {
+          msg += `Frase correta: "${correct_sentence}"\n`;
+        }
+        if (feedback_text) {
+          msg += `Dica: ${feedback_text}`;
+        }
+
+        speechStatus.textContent = msg || 'Correção recebida, mas vazia.';
+      } catch (err) {
+        console.error('Erro ao enviar áudio para /api/speaking:', err);
+        speechStatus.textContent = 'Erro de rede ao enviar o áudio.';
+      }
+    }
+
+    // ---------- gravação local ----------
     let mediaRecorder = null;
     let chunks = [];
     let isRecording = false;
@@ -622,7 +694,10 @@
             const url = URL.createObjectURL(blob);
             speechAudio.src = url;
             speechAudio.style.display = 'block';
-            speechStatus.textContent = 'Gravação concluída. Ouça sua pronúncia. Em breve, este áudio será enviado para a IA para correção.';
+            speechStatus.textContent = 'Gravação concluída. Enviando para a IA corrigir sua pronúncia...';
+
+            // envia para API de speaking
+            sendToSpeakingAPI(blob);
           } catch (err) {
             console.error('Erro ao processar áudio gravado:', err);
             speechStatus.textContent = 'Erro ao processar a gravação.';
@@ -646,7 +721,6 @@
         isRecording = false;
         recStart.disabled = false;
         recStop.disabled = true;
-        // TODO: aqui no futuro vamos enviar o blob para /api/speaking
       }
     }
 
