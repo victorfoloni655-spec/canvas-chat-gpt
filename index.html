@@ -4,47 +4,219 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Chat Canvas + GPT</title>
 <style>
-  :root{--tiffany:#81D8D0;--bg:#0f1216;--card:#151a21;--text:#eaf2fb;--muted:#9fb3c8;--border:#243041}
-  html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,Segoe UI,Roboto,Arial}
-  .wrap{max-width:800px;margin:0 auto;padding:16px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;min-height:60vh}
-  .header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;justify-content:space-between}
-  .left{display:flex;gap:8px;align-items:center}
-  .dot{width:10px;height:10px;border-radius:50%;background:var(--tiffany)}
-  .title{font-weight:600}
-  .badge{padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#0f172a;font:500 12px system-ui;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  .chat{padding:16px;display:flex;flex-direction:column;gap:10px;overflow:auto;min-height:240px}
-  .msg{max-width:80%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;white-space:pre-wrap}
-  .user{align-self:flex-end;background:rgba(129,216,208,.12)}
-  .bot{align-self:flex-start;background:#0d1117}
-  .footer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border);align-items:center}
-  input,button{font:inherit}
-  input{
-    flex:1;background:#0d1117;color:var(--text);border:1px solid var(--border);
-    border-radius:10px;padding:12px 10px;font-size:16px; /* >=16px evita zoom no iOS */
+  :root {
+    --tiffany:#81D8D0;
+    --bg:#0f1216;
+    --card:#151a21;
+    --text:#eaf2fb;
+    --muted:#9fb3c8;
+    --border:#243041;
   }
-  button{background:var(--tiffany);border:0;border-radius:10px;padding:12px 16px;color:#0b1f1e;cursor:pointer;font-weight:700}
-  button:disabled{opacity:.6;cursor:not-allowed}
+
+  * , *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  .wrap {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 16px;
+    height: 100%;
+    display: flex;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 0; /* importante pra funcionar bem em iframe */
+  }
+
+  .header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .left {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--tiffany);
+  }
+
+  .title {
+    font-weight: 600;
+  }
+
+  .badge {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #0f172a;
+    font: 500 12px system-ui;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    white-space: nowrap;
+  }
+
+  .chat {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    flex: 1 1 auto;   /* ocupa o espaço entre header e footer */
+    min-height: 0;    /* ESSENCIAL pra não “estourar” dentro do flex */
+  }
+
+  .msg {
+    max-width: 80%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .user {
+    align-self: flex-end;
+    background: rgba(129,216,208,.12);
+  }
+
+  .bot {
+    align-self: flex-start;
+    background: #0d1117;
+  }
+
+  .footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 12px 14px;
+    border-top: 1px solid var(--border);
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  input, button {
+    font: inherit;
+  }
+
+  input {
+    flex: 1;
+    background: #0d1117;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 10px;
+    font-size: 16px; /* >=16px evita zoom no iOS */
+    min-width: 0;    /* evita estourar no mobile */
+  }
+
+  button {
+    background: var(--tiffany);
+    border: 0;
+    border-radius: 10px;
+    padding: 12px 16px;
+    color: #0b1f1e;
+    cursor: pointer;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  button:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+  }
+
   /* CTAs de upgrade */
-  .cta-wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
-  .cta-btn{
-    display:inline-block;background:#81D8D0;color:#0b1f1e;
-    padding:8px 14px;border-radius:999px;border:0;text-decoration:none;
-    font-weight:700; box-shadow:0 1px 3px rgba(0,0,0,.1)
+  .cta-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 6px;
   }
-  .cta-btn:hover{filter:brightness(0.95)}
+
+  .cta-btn {
+    display: inline-block;
+    background: #81D8D0;
+    color: #0b1f1e;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 0;
+    text-decoration: none;
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  }
+
+  .cta-btn:hover {
+    filter: brightness(0.95);
+  }
+
+  /* Ajustes para telas menores (mobile) */
+  @media (max-width: 600px) {
+    .wrap {
+      padding: 8px;
+    }
+    .header {
+      padding: 10px 12px;
+    }
+    .footer {
+      padding: 10px 10px 12px;
+      gap: 6px;
+    }
+    input {
+      padding: 10px 8px;
+      font-size: 15px;
+    }
+    button {
+      padding: 10px 12px;
+      font-size: 15px;
+    }
+    .msg {
+      max-width: 90%;
+    }
+  }
 </style>
 <body>
   <div class="wrap">
     <div class="card">
       <div class="header">
-        <div class="left"><span class="dot"></span><div class="title">IA English Journey</div></div>
+        <div class="left">
+          <span class="dot"></span>
+          <div class="title">IA English Journey</div>
+        </div>
         <div id="quota-badge" class="badge">carregando…</div>
       </div>
       <div id="chat" class="chat"></div>
       <div class="footer">
-        <input id="input" placeholder="Digite sua pergunta..." autocomplete="off" autocapitalize="sentences" />
+        <input id="input" placeholder="ask a question..." autocomplete="off" autocapitalize="sentences" />
         <button id="send">Enviar</button>
       </div>
     </div>
@@ -127,8 +299,13 @@ async function atualizarQuota(){
     }
     const { remaining, limit } = await r.json();
     badge.textContent = `Restantes: ${remaining} / ${limit}`;
-    if (remaining <= 20) { badge.style.background = '#fff7ed'; badge.style.color = '#9a3412'; }
-    else { badge.style.background = '#f1f5f9'; badge.style.color = '#0f172a'; }
+    if (remaining <= 20) {
+      badge.style.background = '#fff7ed';
+      badge.style.color = '#9a3412';
+    } else {
+      badge.style.background = '#f1f5f9';
+      badge.style.color = '#0f172a';
+    }
   } catch {
     badge.textContent = 'quota indisponível';
   }
@@ -193,25 +370,10 @@ async function send(){
 btn.onclick = send;
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
 
-/* ---------- Correções de teclado/viewport no mobile (iframe) ---------- */
-// Ajusta a área visível quando o teclado abre no iOS (visualViewport)
-(function fixViewportForKeyboard(){
-  const vv = window.visualViewport;
-  if (!vv) return;
-  const onResize = () => {
-    const h = vv.height;
-    chat.style.maxHeight = Math.max(120, h - 160) + 'px';
-    chat.scrollTop = chat.scrollHeight;
-  };
-  vv.addEventListener('resize', onResize);
-  vv.addEventListener('scroll', onResize);
-})();
-
-// Mantém a última mensagem visível ao focar o input
+/* ---------- Comportamento simples no foco do input (mobile) ---------- */
 input.addEventListener('focus', () => {
   setTimeout(() => {
     chat.scrollTop = chat.scrollHeight;
-    input.scrollIntoView({ block: 'nearest' });
   }, 250);
 });
 
