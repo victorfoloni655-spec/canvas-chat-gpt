@@ -1,18 +1,34 @@
 // /api/speaking.js
-// Recebe áudio (base64), identifica o aluno via LTI, transcreve com gpt-4o-mini-transcribe
-// e gera feedback de pronúncia com gpt-4o-mini (texto).
+// Recebe áudio (base64), identifica o aluno via LTI, controla minutos/mês em Redis,
+// transcreve com gpt-4o-mini-transcribe e gera feedback de pronúncia com gpt-4o-mini.
 
+import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_TEXT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
+const OPENAI_TEXT_MODEL  = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const TRANSCRIBE_MODEL   = "gpt-4o-mini-transcribe";
+
+// ------- LIMITE DE ÁUDIO (MINUTOS / MÊS) -------
+const SPEAKING_PREFIX         = process.env.SPEAKING_PREFIX || "speaking";
+const SPEAKING_MINUTES_LIMIT  = Number(process.env.SPEAKING_MINUTES_LIMIT || 20);
+const SPEAKING_SECONDS_LIMIT  = SPEAKING_MINUTES_LIMIT * 60; // 20 min -> 1200s
+
+// Cada gravação, por enquanto, conta como 30 segundos.
+// Assim, com 20 minutos/mês, o aluno tem ~40 gravações.
+const ESTIMATED_SECONDS_PER_RECORDING = 30;
+
+// Redis (mesma config dos outros endpoints)
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 if (!OPENAI_API_KEY) {
   console.warn("⚠️ OPENAI_API_KEY não configurada — /api/speaking não vai funcionar.");
 }
 
-// --- helpers básicos ---
+// ---------- helpers básicos ----------
 
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
@@ -38,14 +54,45 @@ async function getUserIdFromToken(t) {
   }
 }
 
-// --- chama Audio API para transcrever ---
+// chave por mês (UTC) para o contador de segundos de áudio
+function monthKey(userId) {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${SPEAKING_PREFIX}:${y}-${m}:${userId}`;
+}
+
+// soma "seconds" ao contador do mês e verifica se passou do limite
+async function addSecondsAndCheck(userId, secondsToAdd) {
+  const key = monthKey(userId);
+  const add = Math.max(1, Math.round(secondsToAdd || 0)); // garante >= 1s
+
+  // INCRBY no Redis
+  const usedSeconds = await redis.incrby(key, add);
+
+  // primeira vez no mês: define expiração pro 1º dia do próximo mês (UTC)
+  if (usedSeconds === add) {
+    const now = new Date();
+    const expireAt = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + 1,
+      1
+    ) / 1000;
+    await redis.expireat(key, expireAt);
+  }
+
+  const blocked = usedSeconds > SPEAKING_SECONDS_LIMIT;
+  return { key, usedSeconds, blocked };
+}
+
+// ---------- OpenAI: transcrição ----------
 
 async function transcribeAudioFromBase64(base64) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
 
   const buffer = Buffer.from(base64, "base64");
 
-  // Node 18+ / Vercel: Blob e FormData disponíveis via fetch/undici
+  // Node 18+ / Vercel: Blob e FormData disponíveis globalmente
   const blob = new Blob([buffer], { type: "audio/webm" });
   const formData = new FormData();
   formData.append("file", blob, "audio.webm");
@@ -69,7 +116,7 @@ async function transcribeAudioFromBase64(base64) {
   return data.text || "";
 }
 
-// --- chama gpt-4o-mini para corrigir e dar feedback ---
+// ---------- OpenAI: feedback de pronúncia ----------
 
 async function buildFeedbackFromTranscript(transcript) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
@@ -141,7 +188,7 @@ Transcrição aproximada do que o aluno falou:
   };
 }
 
-// --- handler principal ---
+// ---------- handler principal ----------
 
 export default async function handler(req, res) {
   try {
@@ -171,7 +218,25 @@ export default async function handler(req, res) {
       });
     }
 
-    // (aqui no futuro podemos somar minutos em Redis, etc.)
+    // --------- CONTROLE DE USO MENSAL (minutos) ---------
+    const { usedSeconds, blocked } = await addSecondsAndCheck(
+      userId,
+      ESTIMATED_SECONDS_PER_RECORDING
+    );
+
+    if (blocked) {
+      const usedMin  = usedSeconds / 60;
+      const limitMin = SPEAKING_SECONDS_LIMIT / 60;
+
+      return res.status(429).json({
+        error: "limit_reached",
+        message: `Você atingiu o limite de ${limitMin} minutos de prática de áudio neste mês.`,
+        usedSeconds,
+        usedMinutes: Number(usedMin.toFixed(1)),
+        limitSeconds: SPEAKING_SECONDS_LIMIT,
+        limitMinutes: limitMin,
+      });
+    }
 
     // 1) Transcreve o áudio
     const transcript = await transcribeAudioFromBase64(audio);
@@ -184,6 +249,8 @@ export default async function handler(req, res) {
       transcript,
       correct_sentence: feedback.correct_sentence,
       feedback_text: feedback.feedback_text,
+      usedSeconds,
+      limitSeconds: SPEAKING_SECONDS_LIMIT,
     });
   } catch (e) {
     console.error("SPEAKING error:", e);
