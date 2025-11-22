@@ -339,6 +339,9 @@
             <div id="speech-status" class="speaking-status">
 Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
             </div>
+            <!-- NOVO: texto com uso de minutos do mês -->
+            <div id="speech-usage" class="speaking-status"></div>
+
             <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
             <audio id="speech-tts" class="speaking-audio" controls style="display:none"></audio>
           </div>
@@ -399,6 +402,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     const recStart    = document.getElementById('rec-start');
     const recStop     = document.getElementById('rec-stop');
     const speechStatus= document.getElementById('speech-status');
+    const speechUsage = document.getElementById('speech-usage');
     const speechAudio = document.getElementById('speech-playback');
     const speechTTS   = document.getElementById('speech-tts');
 
@@ -628,6 +632,12 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
           if (res.status === 429) {
             const j = await res.json().catch(() => ({}));
             speechStatus.textContent = (j && j.message) || 'Você atingiu o limite de prática de áudio.';
+
+            if (speechUsage && j && typeof j.usedMinutes === 'number' && typeof j.limitMinutes === 'number') {
+              const usedStr  = j.usedMinutes.toFixed(1).replace('.', ',');
+              const limitStr = j.limitMinutes.toFixed(0);
+              speechUsage.textContent = `Uso neste mês: ${usedStr} / ${limitStr} minutos.`;
+            }
             return;
           }
           const j = await res.json().catch(() => ({}));
@@ -637,7 +647,14 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         }
 
         const data = await res.json().catch(() => ({}));
-        const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
+        const {
+          transcript,
+          correct_sentence,
+          feedback_text,
+          audioBase64,
+          usedSeconds,
+          limitSeconds
+        } = data || {};
 
         let msg = '';
         if (transcript) {
@@ -651,6 +668,15 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         }
 
         speechStatus.textContent = msg || 'Correção recebida, mas vazia.';
+
+        // NOVO: mostra quantos minutos já foram usados / limite
+        if (speechUsage && typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
+          const usedMin  = usedSeconds / 60;
+          const limitMin = limitSeconds / 60;
+          const usedStr  = usedMin.toFixed(1).replace('.', ',');
+          const limitStr = limitMin.toFixed(0);
+          speechUsage.textContent = `Você já usou ${usedStr} / ${limitStr} minutos de prática de áudio neste mês.`;
+        }
 
         if (audioBase64 && speechTTS) {
           const ttsBlob = base64ToBlob(audioBase64, "audio/mpeg");
