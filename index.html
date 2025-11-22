@@ -339,7 +339,7 @@
             <div id="speech-status" class="speaking-status">
 Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
             </div>
-            <!-- NOVO: texto com uso de minutos do mês -->
+            <!-- texto minimalista com uso de áudio -->
             <div id="speech-usage" class="speaking-status"></div>
 
             <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
@@ -384,7 +384,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
   const SYSTEM_MESSAGES = [
     {
       role: "system",
-      content: "Você é um tutor de inglês que vai tirar dúvidas dos alunos, seja claro e objetivo."
+      content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo."
     }
   ];
 
@@ -412,6 +412,34 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     }
 
     const messages = [...SYSTEM_MESSAGES];
+
+    // --- estado global para o badge ---
+    let activeTab   = 'chat';
+    let lastQuota   = null; // {remaining, limit}
+    let audioUsage  = null; // {usedSeconds, limitSeconds, label}
+
+    function formatMinutes(num) {
+      return num.toFixed(1).replace('.', ',');
+    }
+
+    function updateBadge() {
+      if (!badge) return;
+
+      if (activeTab === 'chat') {
+        if (lastQuota) {
+          badge.textContent = `Restantes: ${lastQuota.remaining} / ${lastQuota.limit}`;
+        } else {
+          badge.textContent = 'carregando…';
+        }
+      } else {
+        if (audioUsage && audioUsage.label) {
+          badge.textContent = audioUsage.label;
+        } else {
+          // antes de qualquer gravação, assume 0 / 20 min como referência
+          badge.textContent = 'Restante: 0,0 / 20 minutos';
+        }
+      }
+    }
 
     function addMsg(text, who){
       const el = document.createElement('div');
@@ -471,17 +499,15 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
           throw new Error('quota not ok');
         }
         const { remaining, limit } = await r.json();
-        badge.textContent = `Restantes: ${remaining} / ${limit}`;
-        if (remaining <= 20) {
-          badge.style.background = '#fff7ed';
-          badge.style.color = '#9a3412';
-        } else {
-          badge.style.background = '#f1f5f9';
-          badge.style.color = '#0f172a';
+        lastQuota = { remaining, limit };
+        if (activeTab === 'chat') {
+          updateBadge();
         }
       } catch (e) {
         console.error('Erro ao buscar quota:', e);
-        badge.textContent = 'quota indisponível';
+        if (activeTab === 'chat') {
+          badge.textContent = 'quota indisponível';
+        }
       }
     }
 
@@ -572,6 +598,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
 
     function activateTab(which) {
       if (!panelChat || !panelSpeak || !tabChat || !tabSpeaking) return;
+      activeTab = which;
       if (which === 'chat') {
         panelChat.classList.add('active');
         panelSpeak.classList.remove('active');
@@ -583,6 +610,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         tabChat.classList.remove('active');
         tabSpeaking.classList.add('active');
       }
+      updateBadge();
     }
 
     tabChat?.addEventListener('click', () => activateTab('chat'));
@@ -636,7 +664,16 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
             if (speechUsage && j && typeof j.usedMinutes === 'number' && typeof j.limitMinutes === 'number') {
               const usedStr  = j.usedMinutes.toFixed(1).replace('.', ',');
               const limitStr = j.limitMinutes.toFixed(0);
-              speechUsage.textContent = `Uso neste mês: ${usedStr} / ${limitStr} minutos.`;
+              const label    = `Restante: ${usedStr} / ${limitStr} minutos`;
+              speechUsage.textContent = label;
+              audioUsage = {
+                usedSeconds: j.usedMinutes * 60,
+                limitSeconds: j.limitMinutes * 60,
+                label
+              };
+              if (activeTab === 'speaking') {
+                updateBadge();
+              }
             }
             return;
           }
@@ -669,13 +706,17 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
 
         speechStatus.textContent = msg || 'Correção recebida, mas vazia.';
 
-        // NOVO: mostra quantos minutos já foram usados / limite
-        if (speechUsage && typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
+        if (typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
           const usedMin  = usedSeconds / 60;
           const limitMin = limitSeconds / 60;
-          const usedStr  = usedMin.toFixed(1).replace('.', ',');
+          const usedStr  = formatMinutes(usedMin);
           const limitStr = limitMin.toFixed(0);
-          speechUsage.textContent = `Você já usou ${usedStr} / ${limitStr} minutos de prática de áudio neste mês.`;
+          const label    = `Restante: ${usedStr} / ${limitStr} minutos`;
+          if (speechUsage) speechUsage.textContent = label;
+          audioUsage = { usedSeconds, limitSeconds, label };
+          if (activeTab === 'speaking') {
+            updateBadge();
+          }
         }
 
         if (audioBase64 && speechTTS) {
@@ -757,7 +798,8 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
 
     captureTokenFromURL();
     loadLocalHistory();
-    atualizarQuota();
+    atualizarQuota();     // isso vai preencher lastQuota e atualizar o badge do Chat
+    updateBadge();        // garante um estado inicial consistente
   }
 
   if (document.readyState === 'loading') {
