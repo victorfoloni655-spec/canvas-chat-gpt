@@ -297,7 +297,7 @@
     <div class="card">
       <div class="header">
         <div class="left">
-          <span class="dot"></span>
+          <span class="dot"></"></span>
           <div class="title">IA English Journey</div>
         </div>
         <div id="quota-badge" class="badge">carregando…</div>
@@ -339,7 +339,6 @@
             <div id="speech-status" class="speaking-status">
 Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
             </div>
-            <!-- texto minimalista com uso de áudio -->
             <div id="speech-usage" class="speaking-status"></div>
 
             <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
@@ -388,6 +387,10 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
     }
   ];
 
+  function formatMinutes(num) {
+    return num.toFixed(1).replace('.', ',');
+  }
+
   async function init() {
     const chat        = document.getElementById('chat');
     const input       = document.getElementById('input');
@@ -411,16 +414,20 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       return;
     }
 
+    if (speechUsage) {
+      speechUsage.textContent = 'Restante: 0,0 / 20 minutos';
+    }
+
     const messages = [...SYSTEM_MESSAGES];
 
-    // --- estado global para o badge ---
-    let activeTab   = 'chat';
-    let lastQuota   = null; // {remaining, limit}
-    let audioUsage  = null; // {usedSeconds, limitSeconds, label}
+    let activeTab  = 'chat';
+    let lastQuota  = null; // {remaining, limit}
+    let audioUsage = null; // {usedSeconds, limitSeconds, label}
 
-    function formatMinutes(num) {
-      return num.toFixed(1).replace('.', ',');
-    }
+    let mediaRecorder = null;
+    let chunks        = [];
+    let isRecording   = false;
+    let recordStartMs = 0;
 
     function updateBadge() {
       if (!badge) return;
@@ -435,7 +442,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         if (audioUsage && audioUsage.label) {
           badge.textContent = audioUsage.label;
         } else {
-          // antes de qualquer gravação, assume 0 / 20 min como referência
           badge.textContent = 'Restante: 0,0 / 20 minutos';
         }
       }
@@ -493,7 +499,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         const r = await fetch(url, { credentials: 'include' });
         if (!r.ok) {
           if (r.status === 401) {
-            badge.textContent = 'entre pelo Canvas';
+            if (activeTab === 'chat') badge.textContent = 'entre pelo Canvas';
             return;
           }
           throw new Error('quota not ok');
@@ -626,7 +632,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       return new Blob([bytes], { type: mimeType || "audio/mpeg" });
     }
 
-    async function sendToSpeakingAPI(blob) {
+    async function sendToSpeakingAPI(blob, durationMs) {
       if (!speechStatus) return;
 
       try {
@@ -644,6 +650,9 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         const t = getToken();
         const payload = { audio: base64 };
         if (t) payload.t = t;
+        if (typeof durationMs === 'number' && durationMs > 0) {
+          payload.durationMs = durationMs;
+        }
 
         const res = await fetch(SPEAKING_URL, {
           method: 'POST',
@@ -661,14 +670,16 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
             const j = await res.json().catch(() => ({}));
             speechStatus.textContent = (j && j.message) || 'Você atingiu o limite de prática de áudio.';
 
-            if (speechUsage && j && typeof j.usedMinutes === 'number' && typeof j.limitMinutes === 'number') {
-              const usedStr  = j.usedMinutes.toFixed(1).replace('.', ',');
-              const limitStr = j.limitMinutes.toFixed(0);
+            if (speechUsage && j && typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
+              const usedMin  = j.usedSeconds / 60;
+              const limitMin = j.limitSeconds / 60;
+              const usedStr  = formatMinutes(usedMin);
+              const limitStr = limitMin.toFixed(0);
               const label    = `Restante: ${usedStr} / ${limitStr} minutos`;
               speechUsage.textContent = label;
               audioUsage = {
-                usedSeconds: j.usedMinutes * 60,
-                limitSeconds: j.limitMinutes * 60,
+                usedSeconds: j.usedSeconds,
+                limitSeconds: j.limitSeconds,
                 label
               };
               if (activeTab === 'speaking') {
@@ -731,10 +742,6 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
       }
     }
 
-    let mediaRecorder = null;
-    let chunks = [];
-    let isRecording = false;
-
     async function startRecording(){
       if (!recStart || !recStop || !speechStatus || !speechAudio) return;
       try {
@@ -747,6 +754,7 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
         mediaRecorder = new MediaRecorder(stream);
         chunks = [];
         isRecording = true;
+        recordStartMs = Date.now();
 
         mediaRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) {
@@ -764,9 +772,12 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
               speechTTS.style.display = 'none';
               speechTTS.removeAttribute('src');
             }
-            speechStatus.textContent = 'Gravação concluída. Enviando para a IA corrigir sua pronúncia...';
 
-            sendToSpeakingAPI(blob);
+            const durationMs = recordStartMs ? (Date.now() - recordStartMs) : null;
+            recordStartMs = 0;
+
+            speechStatus.textContent = 'Gravação concluída. Enviando para a IA corrigir sua pronúncia...';
+            sendToSpeakingAPI(blob, durationMs);
           } catch (err) {
             console.error('Erro ao processar áudio gravado:', err);
             speechStatus.textContent = 'Erro ao processar a gravação.';
@@ -798,8 +809,8 @@ Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Para
 
     captureTokenFromURL();
     loadLocalHistory();
-    atualizarQuota();     // isso vai preencher lastQuota e atualizar o badge do Chat
-    updateBadge();        // garante um estado inicial consistente
+    atualizarQuota();
+    updateBadge();
   }
 
   if (document.readyState === 'loading') {
