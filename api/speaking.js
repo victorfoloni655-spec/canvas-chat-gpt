@@ -88,7 +88,7 @@ async function buildFeedback(transcript) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
   const systemPrompt =
-    "Você é um professor de inglês que ajuda alunos brasileiros a melhorar a pronúncia, então seja sincero para o aluno evoluir o mais rapido possivel\n" +
+    "Você é um professor de inglês que ajuda alunos brasileiros a melhorar a pronúncia.\n" +
     "Dado o que a IA transcreveu de uma fala do aluno, você deve:\n" +
     "1) deduzir qual deveria ser a frase correta em inglês;\n" +
     "2) dar uma dica curta em português sobre pronúncia;\n" +
