@@ -51,17 +51,55 @@ async function readJson(req) {
 
 // --------- OpenAI helpers ---------
 
+async function transcribeAudio(base64Audio) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY não configurada para speaking.");
+  }
+
+  const audioBuffer = Buffer.from(base64Audio, "base64");
+
+  // usa FormData/Blob do ambiente Node 18+ (Vercel)
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([audioBuffer], { type: "audio/webm" }),
+    "audio.webm"
+  );
+  form.append("model", "whisper-1");
+  form.append("language", "en");
+  form.append("response_format", "json");
+
+  const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: form,
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Erro na transcrição (${resp.status}): ${txt}`);
+  }
+
+  const data = await resp.json();
+  return (data.text || "").trim();
+}
+
 async function buildFeedback(transcript) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+  // Parte fixa
   const baseSystem =
-    "Você é um professor de inglês que ajuda alunos brasileiros falantes de português do Brasil a melhorar a pronúncia.\n" +
+    "Você é um professor de inglês que ajuda alunos brasileiros a melhorar a pronúncia.\n" +
     "Você receberá a transcrição aproximada da fala do aluno (vinda de um modelo de reconhecimento de fala).\n\n" +
     "Sua tarefa é:\n" +
     "1) Deduzir qual deveria ser a frase correta em inglês.\n" +
     "2) Dar um feedback curto em português sobre pronúncia.\n\n";
 
+  // Parte flexível, vinda da Vercel (você já preencheu na SPEAKING_FEEDBACK_PROMPT_PT)
   const extra = process.env.SPEAKING_FEEDBACK_PROMPT_PT || "";
+
   const systemPrompt = baseSystem + extra;
 
   const userPrompt =
@@ -93,6 +131,7 @@ async function buildFeedback(transcript) {
   const json = await resp.json();
   const content = json?.choices?.[0]?.message?.content || "";
 
+  // TENTAR interpretar como JSON, mas com fallback seguro
   let parsed;
   try {
     parsed = JSON.parse(content);
@@ -111,6 +150,7 @@ async function buildFeedback(transcript) {
       feedback_text = parsed.feedback_pt;
     }
   } else {
+    // se o modelo não mandou JSON, usamos o texto bruto como feedback
     feedback_text = content;
   }
 
