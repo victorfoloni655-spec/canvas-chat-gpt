@@ -51,53 +51,23 @@ async function readJson(req) {
 
 // --------- OpenAI helpers ---------
 
-async function transcribeAudio(base64Audio) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY não configurada para speaking.");
-  }
-
-  const audioBuffer = Buffer.from(base64Audio, "base64");
-  const form = new FormData();
-  form.append(
-    "file",
-    new Blob([audioBuffer], { type: "audio/webm" }),
-    "audio.webm"
-  );
-  form.append("model", "whisper-1");
-  form.append("language", "en");
-  form.append("response_format", "json");
-
-  const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: form,
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    throw new Error(`Erro na transcrição (${resp.status}): ${txt}`);
-  }
-
-  const data = await resp.json();
-  return (data.text || "").trim();
-}
-
 async function buildFeedback(transcript) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const systemPrompt =
-    "Você é um professor de inglês que ajuda alunos brasileiros a melhorar a pronúncia.\n" +
-    "Dado o que a IA transcreveu de uma fala do aluno, você deve:\n" +
-    "1) deduzir qual deveria ser a frase correta em inglês;\n" +
-    "2) dar uma dica curta em português sobre pronúncia;\n" +
-    "3) responder APENAS em JSON, no formato:\n" +
-    '{"correct_sentence":"frase em inglês","feedback_pt":"dica curta em português"}';
+  const baseSystem =
+    "Você é um professor de inglês que ajuda alunos brasileiros falantes de português do Brasil a melhorar a pronúncia.\n" +
+    "Você receberá a transcrição aproximada da fala do aluno (vinda de um modelo de reconhecimento de fala).\n\n" +
+    "Sua tarefa é:\n" +
+    "1) Deduzir qual deveria ser a frase correta em inglês.\n" +
+    "2) Dar um feedback curto em português sobre pronúncia.\n\n";
+
+  const extra = process.env.SPEAKING_FEEDBACK_PROMPT_PT || "";
+  const systemPrompt = baseSystem + extra;
 
   const userPrompt =
     `Transcrição aproximada da fala do aluno:\n"${transcript}".\n\n` +
-    "Gere a frase correta em inglês e uma dica de pronúncia.";
+    "1) Deduz a frase correta em inglês.\n" +
+    "2) Depois, no feedback em português, foque em 1 a 3 pontos de pronúncia importantes para esse caso.";
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
