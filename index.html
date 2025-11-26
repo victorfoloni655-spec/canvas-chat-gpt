@@ -86,40 +86,40 @@
     white-space: nowrap;
   }
 
-  .tabs {
+  .mode-switch {
     display: flex;
-    border-bottom: 1px solid var(--border);
-    gap: 4px;
-    padding: 0 8px;
+    gap: 8px;
+    padding: 8px 16px 0;
     flex-shrink: 0;
   }
 
-  .tab-btn {
-    border: 0;
-    background: transparent;
-    color: var(--muted);
-    padding: 10px 14px;
-    cursor: pointer;
-    font-weight: 500;
+  .mode-btn {
+    flex: 1;
+    padding: 8px 0;
     border-radius: 999px;
-    margin: 6px 4px;
+    border: 1px solid var(--border);
+    background: #0d1117;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
   }
 
-  .tab-btn.active {
-    background: rgba(129,216,208,0.12);
-    color: var(--text);
-    border: 1px solid var(--tiffany);
+  .mode-btn.active {
+    background: var(--tiffany);
+    color: #0b1f1e;
+    border-color: transparent;
+    font-weight: 600;
   }
 
-  .panel {
+  .hidden {
     display: none;
-    flex-direction: column;
+  }
+
+  #chat-section, #speak-section {
     flex: 1 1 auto;
     min-height: 0;
-  }
-
-  .panel.active {
     display: flex;
+    flex-direction: column;
   }
 
   .chat {
@@ -151,7 +151,7 @@
     background: #0d1117;
   }
 
-  .footer {
+  .chat-footer {
     display: flex;
     gap: 8px;
     padding: 12px 12px 14px;
@@ -191,6 +191,19 @@
     cursor: not-allowed;
   }
 
+  .btn-secondary {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+
+  .btn-recording {
+    background: #ef4444;
+    color: #fff;
+  }
+
+  /* CTAs de upgrade (chat) */
   .cta-wrap {
     display: flex;
     flex-wrap: wrap;
@@ -215,59 +228,66 @@
     filter: brightness(0.95);
   }
 
-  .speaking-wrap {
+  /* SPEAKING / PRONUNCIATION */
+  .speak-box {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 12px;
     overflow-y: auto;
-    flex: 1 1 auto;
-    min-height: 0;
   }
 
-  .speaking-card {
-    background: #0d1117;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    padding: 12px 14px;
+  .speak-helper {
     font-size: 14px;
     color: var(--muted);
-    white-space: pre-wrap;
+    margin: 0;
   }
 
-  .speaking-actions {
+  .speak-controls {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
     align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
-  .speaking-btn {
-    background: rgba(129,216,208,.15);
-    color: var(--text);
-    border-radius: 999px;
-    padding: 8px 14px;
-    border: 1px solid var(--tiffany);
-    cursor: pointer;
+  #record-timer {
     font-size: 14px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
   }
 
-  .speaking-btn:disabled {
-    opacity: .6;
-    cursor: not-allowed;
-  }
-
-  .speaking-status {
+  .speak-status {
     font-size: 13px;
     color: var(--muted);
-    margin-top: 8px;
-    white-space: pre-wrap;
+    min-height: 18px;
   }
 
-  .speaking-audio {
-    margin-top: 8px;
+  .speak-audio {
+    width: 100%;
+    margin-top: 2px;
   }
 
+  .speak-feedback {
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .speak-block {
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+  }
+
+  .speak-block strong {
+    color: var(--text);
+  }
+
+  /* Ajustes para telas menores (mobile) */
   @media (max-width: 600px) {
     .wrap {
       padding: 8px;
@@ -275,7 +295,7 @@
     .header {
       padding: 10px 12px;
     }
-    .footer {
+    .chat-footer {
       padding: 10px 10px 12px;
       gap: 6px;
     }
@@ -290,535 +310,564 @@
     .msg {
       max-width: 90%;
     }
+    .mode-switch {
+      padding-inline: 12px;
+    }
   }
 </style>
+
 <body>
   <div class="wrap">
     <div class="card">
       <div class="header">
         <div class="left">
-          <span class="dot"></"></span>
+          <span class="dot"></span>
           <div class="title">IA English Journey</div>
         </div>
         <div id="quota-badge" class="badge">carregando…</div>
       </div>
 
-      <div class="tabs">
-        <button id="tab-chat" class="tab-btn active">Chat</button>
-        <button id="tab-speaking" class="tab-btn">Speaking Lab</button>
+      <div class="mode-switch">
+        <button id="tab-chat"  class="mode-btn active">Chat</button>
+        <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <div id="panel-chat" class="panel active">
+      <!-- MODO CHAT -->
+      <div id="chat-section">
         <div id="chat" class="chat"></div>
-        <div class="footer">
+        <div class="chat-footer">
           <input id="input" placeholder="Ask your questions..." autocomplete="off" autocapitalize="sentences" />
           <button id="send">Enviar</button>
         </div>
       </div>
 
-      <div id="panel-speaking" class="panel">
-        <div class="speaking-wrap">
-          <div class="speaking-card">
-            <strong>Speaking Lab (beta)</strong>
-            <br><br>
-            Grave frases em inglês para praticar sua pronúncia.
-            Exemplo: <em>"Do you speak Spanish, my friend?"</em>
-            <br><br>
-            Ao terminar a gravação, o sistema vai:
-            <br>• transcrever aproximadamente o que você falou;
-            <br>• mostrar a frase correta em inglês;
-            <br>• dar uma dica rápida em português sobre a pronúncia;
-            <br>• e tocar a frase corrigida em voz de IA.
+      <!-- MODO SPEAKING / PRONUNCIATION -->
+      <div id="speak-section" class="hidden">
+        <div class="speak-box">
+          <p class="speak-helper">
+            Grave uma frase em inglês para treinar sua pronúncia. Você receberá a frase modelo, feedback escrito e um áudio curto com correção.
+          </p>
+
+          <div class="speak-controls">
+            <button id="record-btn">🎙️ Gravar</button>
+            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar gravação</button>
+            <span id="record-timer">00:00</span>
           </div>
 
-          <div class="speaking-card">
-            <div class="speaking-actions">
-              <button id="rec-start" class="speaking-btn">🎙️ Gravar</button>
-              <button id="rec-stop" class="speaking-btn" disabled>⏹️ Parar</button>
-            </div>
-            <div id="speech-status" class="speaking-status">
-Pronto para gravar. Clique em "Gravar", fale em inglês e depois clique em "Parar".
-            </div>
-            <div id="speech-usage" class="speaking-status"></div>
+          <div id="speak-status" class="speak-status"></div>
 
-            <audio id="speech-playback" class="speaking-audio" controls style="display:none"></audio>
-            <audio id="speech-tts" class="speaking-audio" controls style="display:none"></audio>
-          </div>
+          <audio id="speak-audio" class="speak-audio" controls style="display:none"></audio>
+
+          <div id="speak-feedback" class="speak-feedback"></div>
         </div>
       </div>
     </div>
   </div>
 
 <script>
-(() => {
-  const CHAT_URL     = '/api/chat';
-  const QUOTA_URL    = '/api/quota';
-  const SPEAKING_URL = '/api/speaking';
+const CHAT_URL    = '/api/chat';
+const QUOTA_URL   = '/api/quota';
+const HISTORY_URL = '/api/history';
 
-  const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
+const chat    = document.getElementById('chat');
+const input   = document.getElementById('input');
+const btn     = document.getElementById('send');
+const badge   = document.getElementById('quota-badge');
 
-  function captureTokenFromURL(){
-    try {
-      const u = new URL(window.location.href);
-      const t = u.searchParams.get('t');
-      if (t) {
-        localStorage.setItem('lti_token', t);
-        u.searchParams.delete('t');
-        window.history.replaceState({}, '', u.toString());
-      }
-      return t;
-    } catch {
-      return null;
-    }
+const chatSection  = document.getElementById('chat-section');
+const speakSection = document.getElementById('speak-section');
+const tabChat  = document.getElementById('tab-chat');
+const tabSpeak = document.getElementById('tab-speak');
+
+// SPEAKING DOM
+const recordBtn        = document.getElementById('record-btn');
+const cancelRecordBtn  = document.getElementById('cancel-record-btn');
+const recordTimer      = document.getElementById('record-timer');
+const speakStatus      = document.getElementById('speak-status');
+const speakFeedback    = document.getElementById('speak-feedback');
+const speakAudio       = document.getElementById('speak-audio');
+
+/* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
+function captureTokenFromURL(){
+  const u = new URL(window.location.href);
+  const t = u.searchParams.get('t');
+  if (t) {
+    localStorage.setItem('lti_token', t);
+    u.searchParams.delete('t');
+    window.history.replaceState({}, '', u.toString());
   }
+  return t;
+}
+function getToken(){
+  return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
+}
 
-  function getToken(){
-    try {
-      return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
-    } catch {
-      return captureTokenFromURL() || null;
-    }
-  }
+/* ---------------- ESTADO GLOBAL ---------------- */
+const messages = [
+  { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
+];
 
-  const SYSTEM_MESSAGES = [
-    {
-      role: "system",
-      content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo."
-    }
-  ];
+let currentMode   = 'chat';
+let chatQuota     = null;
+let speakingQuota = null;
 
-  function formatMinutes(num) {
-    return num.toFixed(1).replace('.', ',');
-  }
+/* ---------------- UI helpers (chat) ---------------- */
+function addMsg(text, who){
+  const el = document.createElement('div');
+  el.className = `msg ${who}`;
+  el.textContent = text;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
 
-  async function init() {
-    const chat        = document.getElementById('chat');
-    const input       = document.getElementById('input');
-    const btn         = document.getElementById('send');
-    const badge       = document.getElementById('quota-badge');
+function addCTAPackages(packages){
+  const el = document.createElement('div');
+  el.className = 'msg bot';
 
-    const tabChat     = document.getElementById('tab-chat');
-    const tabSpeaking = document.getElementById('tab-speaking');
-    const panelChat   = document.getElementById('panel-chat');
-    const panelSpeak  = document.getElementById('panel-speaking');
+  const txt = document.createElement('div');
+  txt.textContent = 'Você atingiu o limite mensal. Deseja liberar mais mensagens?';
 
-    const recStart    = document.getElementById('rec-start');
-    const recStop     = document.getElementById('rec-stop');
-    const speechStatus= document.getElementById('speech-status');
-    const speechUsage = document.getElementById('speech-usage');
-    const speechAudio = document.getElementById('speech-playback');
-    const speechTTS   = document.getElementById('speech-tts');
+  const wrap = document.createElement('div');
+  wrap.className = 'cta-wrap';
 
-    if (!chat || !input || !btn || !badge) {
-      console.error('Elementos do chat não encontrados');
+  (packages || []).forEach(p => {
+    if (!p?.url) return;
+    const a = document.createElement('a');
+    a.className = 'cta-btn';
+    a.href = p.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = p.label || 'Comprar';
+    wrap.appendChild(a);
+  });
+
+  el.appendChild(txt);
+  el.appendChild(wrap);
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/* ---------------- HISTÓRICO ---------------- */
+async function loadHistory() {
+  try {
+    const t = getToken();
+    const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
       return;
     }
 
-    if (speechUsage) {
-      speechUsage.textContent = 'Restante: 0,0 / 20 minutos';
-    }
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
 
-    const messages = [...SYSTEM_MESSAGES];
+    items.forEach(m => {
+      if (!m || typeof m.content !== 'string') return;
+      const who = m.role === 'user' ? 'user' : 'bot';
+      addMsg(m.content, who);
+    });
+  } catch (err) {
+    console.error('Erro ao carregar histórico:', err);
+  }
+}
 
-    let activeTab  = 'chat';
-    let lastQuota  = null; // {remaining, limit}
-    let audioUsage = null; // {usedSeconds, limitSeconds, label}
-
-    let mediaRecorder = null;
-    let chunks        = [];
-    let isRecording   = false;
-    let recordStartMs = 0;
-
-    function updateBadge() {
-      if (!badge) return;
-
-      if (activeTab === 'chat') {
-        if (lastQuota) {
-          badge.textContent = `Restantes: ${lastQuota.remaining} / ${lastQuota.limit}`;
-        } else {
-          badge.textContent = 'carregando…';
-        }
-      } else {
-        if (audioUsage && audioUsage.label) {
-          badge.textContent = audioUsage.label;
-        } else {
-          badge.textContent = 'Restante: 0,0 / 20 minutos';
-        }
+/* ---------------- QUOTA CHAT ---------------- */
+async function atualizarQuotaChat(){
+  try {
+    const t = getToken();
+    const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) {
+      if (r.status === 401) {
+        chatQuota = null;
+        if (currentMode === 'chat') badge.textContent = 'entre pelo Canvas';
+        return;
       }
+      throw new Error('quota not ok');
+    }
+    const { remaining, limit } = await r.json();
+    chatQuota = { remaining, limit };
+    if (currentMode === 'chat') updateBadge();
+  } catch (e) {
+    console.error('Erro quota chat:', e);
+    if (currentMode === 'chat') badge.textContent = 'quota indisponível';
+  }
+}
+
+/* ---------------- BADGE (TOPO) ---------------- */
+function updateBadge() {
+  if (currentMode === 'chat') {
+    if (chatQuota) {
+      badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
+    } else {
+      badge.textContent = 'carregando…';
+    }
+  } else {
+    if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
+      const used  = speakingQuota.usedSeconds || 0;
+      const limit = speakingQuota.limitSeconds;
+      const remainingMin = Math.max(0, (limit - used) / 60);
+      const limitMin     = limit / 60;
+      badge.textContent = `restante ${remainingMin.toFixed(1)} / ${limitMin.toFixed(1)} min`;
+    } else {
+      badge.textContent = 'restante -- / -- min';
+    }
+  }
+}
+
+/* ---------------- MODO (ABA) ---------------- */
+function setMode(mode) {
+  currentMode = mode;
+  if (mode === 'chat') {
+    tabChat.classList.add('active');
+    tabSpeak.classList.remove('active');
+    chatSection.classList.remove('hidden');
+    speakSection.classList.add('hidden');
+  } else {
+    tabChat.classList.remove('active');
+    tabSpeak.classList.add('active');
+    chatSection.classList.add('hidden');
+    speakSection.classList.remove('hidden');
+  }
+  updateBadge();
+}
+
+/* ---------------- ENVIO CHAT ---------------- */
+async function send(){
+  const text = input.value.trim();
+  if(!text) return;
+  addMsg(text, 'user');
+  input.value = '';
+  btn.disabled = true;
+
+  messages.push({ role: "user", content: text });
+
+  try {
+    const t = getToken();
+    const body = { messages };
+    if (t) body.t = t;
+
+    const res = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      credentials: "include",
+      body: JSON.stringify(body)
+    });
+
+    if (res.status === 429) {
+      const j = await res.json().catch(() => ({}));
+      addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
+      if (Array.isArray(j.packages) && j.packages.length > 0) addCTAPackages(j.packages);
+      btn.disabled = false;
+      atualizarQuotaChat();
+      return;
     }
 
-    function addMsg(text, who){
-      const el = document.createElement('div');
-      el.className = `msg ${who}`;
-      el.textContent = text;
-      chat.appendChild(el);
-      chat.scrollTop = chat.scrollHeight;
+    if(!res.ok){
+      const j = await res.json().catch(() => ({}));
+      console.error('Falha /api/chat', res.status, j);
+      addMsg("Erro no servidor. Tente novamente.", 'bot');
+      btn.disabled = false;
+      return;
     }
 
-    function saveLocalHistory(role, content) {
-      try {
-        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-        let arr = [];
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) arr = parsed;
-        }
-        arr.push({ role, content, ts: Date.now() });
-        if (arr.length > 200) {
-          arr = arr.slice(arr.length - 200);
-        }
-        localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(arr));
-      } catch (e) {
-        console.error('Erro ao salvar histórico local:', e);
+    const data = await res.json();
+    const reply = data.reply || "(sem conteúdo)";
+    addMsg(reply, 'bot');
+    messages.push({ role: "assistant", content: reply });
+
+    btn.disabled = false;
+    atualizarQuotaChat();
+  } catch (err) {
+    console.error('Erro de rede /api/chat:', err);
+    addMsg("Erro de rede. Tente novamente.", 'bot');
+    btn.disabled = false;
+  }
+}
+
+/* ---------- Correções de teclado/viewport no mobile (chat) ---------- */
+(function fixViewportForKeyboard(){
+  const vv = window.visualViewport;
+  if (!vv || !chat) return;
+  const onResize = () => {
+    const h = vv.height;
+    chat.style.maxHeight = Math.max(120, h - 220) + 'px';
+    chat.scrollTop = chat.scrollHeight;
+  };
+  vv.addEventListener('resize', onResize);
+  vv.addEventListener('scroll', onResize);
+})();
+
+input.addEventListener('focus', () => {
+  setTimeout(() => {
+    chat.scrollTop = chat.scrollHeight;
+    input.scrollIntoView({ block: 'nearest' });
+  }, 250);
+});
+
+/* ---------------- SPEAKING / PRONUNCIATION ---------------- */
+let mediaRecorder = null;
+let audioChunks   = [];
+let isRecording   = false;
+let isCancelling  = false;
+let recordStart   = null;
+let recordTimerId = null;
+
+function resetRecordingUI(){
+  isRecording = false;
+  recordBtn.disabled = false;
+  recordBtn.textContent = '🎙️ Gravar';
+  recordBtn.classList.remove('btn-recording');
+  cancelRecordBtn.disabled = true;
+  if (recordTimerId) {
+    clearInterval(recordTimerId);
+    recordTimerId = null;
+  }
+  recordTimer.textContent = '00:00';
+}
+
+async function startRecording(){
+  if (isRecording) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    speakStatus.textContent = "Seu navegador não permite gravação de áudio.";
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    isRecording = true;
+    isCancelling = false;
+    recordStart = Date.now();
+    speakStatus.textContent = "Gravando... fale sua frase em inglês.";
+    recordBtn.textContent = "Parar e enviar";
+    recordBtn.classList.add('btn-recording');
+    cancelRecordBtn.disabled = false;
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      if (recordTimerId) {
+        clearInterval(recordTimerId);
+        recordTimerId = null;
       }
-    }
+      const durationMs = recordStart ? (Date.now() - recordStart) : 0;
 
-    function loadLocalHistory() {
-      try {
-        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-        if (!raw) return;
-        const arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) return;
-
-        arr.forEach(m => {
-          if (!m || typeof m.content !== 'string') return;
-          const who = m.role === 'user' ? 'user' : 'bot';
-          addMsg(m.content, who);
-          const role = who === 'user' ? 'user' : 'assistant';
-          messages.push({ role, content: m.content });
-        });
-      } catch (e) {
-        console.error('Erro ao carregar histórico local:', e);
+      // para as tracks do microfone
+      if (mediaRecorder && mediaRecorder.stream) {
+        mediaRecorder.stream.getTracks().forEach(tr => tr.stop());
       }
-    }
+      mediaRecorder = null;
 
-    async function atualizarQuota(){
-      try {
-        const t = getToken();
-        const url = t ? `${QUOTA_URL}?t=${encodeURIComponent(t)}` : QUOTA_URL;
-        const r = await fetch(url, { credentials: 'include' });
-        if (!r.ok) {
-          if (r.status === 401) {
-            if (activeTab === 'chat') badge.textContent = 'entre pelo Canvas';
-            return;
-          }
-          throw new Error('quota not ok');
-        }
-        const { remaining, limit } = await r.json();
-        lastQuota = { remaining, limit };
-        if (activeTab === 'chat') {
-          updateBadge();
-        }
-      } catch (e) {
-        console.error('Erro ao buscar quota:', e);
-        if (activeTab === 'chat') {
-          badge.textContent = 'quota indisponível';
-        }
-      }
-    }
-
-    async function send(){
-      const text = input.value.trim();
-      if(!text) return;
-
-      addMsg(text, 'user');
-      saveLocalHistory('user', text);
-      input.value = '';
-      btn.disabled = true;
-
-      messages.push({ role: "user", content: text });
-
-      let data;
-      try {
-        const t = getToken();
-        const body = { messages };
-        if (t) body.t = t;
-
-        const res = await fetch(CHAT_URL, {
-          method: "POST",
-          headers: {"Content-Type":"application/json"},
-          credentials: "include",
-          body: JSON.stringify(body)
-        });
-
-        if (res.status === 429) {
-          const j = await res.json().catch(() => ({}));
-          addMsg(`Limite mensal atingido (${j.used}/${j.limit}).`, 'bot');
-          if (Array.isArray(j.packages) && j.packages.length > 0) {
-            const el = document.createElement('div');
-            el.className = 'msg bot';
-            const wrap = document.createElement('div');
-            wrap.className = 'cta-wrap';
-            j.packages.forEach(p => {
-              if (!p?.url) return;
-              const a = document.createElement('a');
-              a.className = 'cta-btn';
-              a.href = p.url;
-              a.target = '_blank';
-              a.rel = 'noopener noreferrer';
-              a.textContent = p.label || 'Comprar';
-              wrap.appendChild(a);
-            });
-            el.appendChild(wrap);
-            chat.appendChild(el);
-            chat.scrollTop = chat.scrollHeight;
-          }
-          btn.disabled = false;
-          await atualizarQuota();
-          return;
-        }
-
-        if(!res.ok){
-          const j = await res.json().catch(() => ({}));
-          console.error('Falha /api/chat', res.status, j);
-          addMsg("Erro no servidor. Tente novamente.", 'bot');
-          btn.disabled = false;
-          return;
-        }
-
-        data = await res.json();
-      } catch (err) {
-        console.error('Erro de rede /api/chat:', err);
-        addMsg("Erro de rede. Tente novamente.", 'bot');
-        btn.disabled = false;
+      if (isCancelling) {
+        speakStatus.textContent = "Gravação cancelada.";
+        resetRecordingUI();
         return;
       }
 
-      const reply = data.reply || "(sem conteúdo)";
-      addMsg(reply, 'bot');
-      saveLocalHistory('assistant', reply);
-      messages.push({ role: "assistant", content: reply });
+      try {
+        speakStatus.textContent = "Processando e enviando para correção...";
+        const blob   = new Blob(audioChunks, { type: 'audio/webm' });
+        const base64 = await blobToBase64(blob);
+        await sendSpeakingAudio(base64, durationMs);
+      } catch (err) {
+        console.error("Erro ao processar/enviar áudio:", err);
+        speakStatus.textContent = "Erro ao enviar o áudio para correção.";
+      } finally {
+        resetRecordingUI();
+      }
+    };
 
-      btn.disabled = false;
-      atualizarQuota();
-    }
+    mediaRecorder.start();
 
-    btn.addEventListener('click', send);
-    input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
+    recordTimerId = setInterval(() => {
+      const sec = Math.floor((Date.now() - recordStart) / 1000);
+      const m = String(Math.floor(sec / 60)).padStart(2,'0');
+      const s = String(sec % 60).padStart(2,'0');
+      recordTimer.textContent = `${m}:${s}`;
+    }, 500);
+  } catch (err) {
+    console.error("Erro ao acessar microfone:", err);
+    speakStatus.textContent = "Não foi possível acessar o microfone (permissão negada?).";
+    isRecording = false;
+    mediaRecorder = null;
+    resetRecordingUI();
+  }
+}
 
-    input.addEventListener('focus', () => {
-      setTimeout(() => {
-        chat.scrollTop = chat.scrollHeight;
-      }, 250);
+function stopRecording(send=true){
+  if (!isRecording || !mediaRecorder) return;
+  isCancelling = !send;
+  recordBtn.disabled = true;
+  cancelRecordBtn.disabled = true;
+  speakStatus.textContent = send ? "Finalizando gravação..." : "Cancelando gravação...";
+  mediaRecorder.stop();
+}
+
+function blobToBase64(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result;
+      const base64 = String(dataUrl).split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function escapeHtml(str){
+  return String(str || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+function showSpeakingResult(data){
+  const { transcript, correct_sentence, feedback_text, audioBase64, usedSeconds, limitSeconds } = data || {};
+  const t = transcript || "(não reconhecido)";
+  const c = correct_sentence || "(sem frase modelo)";
+  const f = feedback_text || "(sem feedback)";
+
+  speakFeedback.innerHTML = `
+    <div class="speak-block">
+      <strong>O que foi entendido:</strong><br>${escapeHtml(t)}
+    </div>
+    <div class="speak-block">
+      <strong>Frase modelo:</strong><br>${escapeHtml(c)}
+    </div>
+    <div class="speak-block">
+      <strong>Feedback de pronúncia:</strong><br>${escapeHtml(f)}
+    </div>
+  `;
+
+  if (audioBase64) {
+    speakAudio.style.display = 'block';
+    speakAudio.src = 'data:audio/mp3;base64,' + audioBase64;
+    speakAudio.load();
+    speakAudio.play().catch(() => {});
+  } else {
+    speakAudio.style.display = 'none';
+  }
+
+  if (typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
+    speakingQuota = { usedSeconds, limitSeconds };
+    if (currentMode === 'speaking') updateBadge();
+  }
+}
+
+async function sendSpeakingAudio(base64, durationMs){
+  try {
+    const t = getToken();
+    const body = { audio: base64, durationMs };
+    if (t) body.t = t;
+
+    const res = await fetch('/api/speaking', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify(body)
     });
 
-    function activateTab(which) {
-      if (!panelChat || !panelSpeak || !tabChat || !tabSpeaking) return;
-      activeTab = which;
-      if (which === 'chat') {
-        panelChat.classList.add('active');
-        panelSpeak.classList.remove('active');
-        tabChat.classList.add('active');
-        tabSpeaking.classList.remove('active');
-      } else {
-        panelChat.classList.remove('active');
-        panelSpeak.classList.add('active');
-        tabChat.classList.remove('active');
-        tabSpeaking.classList.add('active');
+    if (res.status === 429) {
+      const j = await res.json().catch(() => ({}));
+      speakStatus.textContent = j.message || "Limite mensal de prática de áudio atingido.";
+      if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
+        speakingQuota = { usedSeconds: j.usedSeconds, limitSeconds: j.limitSeconds };
+        if (currentMode === 'speaking') updateBadge();
       }
-      updateBadge();
+      return;
     }
 
-    tabChat?.addEventListener('click', () => activateTab('chat'));
-    tabSpeaking?.addEventListener('click', () => activateTab('speaking'));
-
-    function base64ToBlob(base64, mimeType) {
-      const binary = atob(base64);
-      const len = binary.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return new Blob([bytes], { type: mimeType || "audio/mpeg" });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      console.error("Erro /api/speaking", res.status, txt);
+      speakStatus.textContent = "Erro ao enviar o áudio para correção.";
+      return;
     }
 
-    async function sendToSpeakingAPI(blob, durationMs) {
-      if (!speechStatus) return;
+    const data = await res.json();
+    showSpeakingResult(data);
+    speakStatus.textContent = "Correção recebida.";
+  } catch (err) {
+    console.error("Erro rede /api/speaking", err);
+    speakStatus.textContent = "Erro de rede ao enviar o áudio para correção.";
+  }
+}
 
-      try {
-        speechStatus.textContent = 'Enviando áudio para correção...';
+/* --------- Montagem do áudio falado: "Check this + dica rápida" --------- */
+function extractMainTip(feedback) {
+  if (!feedback) return "";
 
-        const arrayBuffer = await blob.arrayBuffer();
-        let binary = '';
-        const bytes = new Uint8Array(arrayBuffer);
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64 = btoa(binary);
+  const lines = feedback
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l);
 
-        const t = getToken();
-        const payload = { audio: base64 };
-        if (t) payload.t = t;
-        if (typeof durationMs === 'number' && durationMs > 0) {
-          payload.durationMs = durationMs;
-        }
+  if (!lines.length) return "";
 
-        const res = await fetch(SPEAKING_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(payload),
-        });
+  let first = lines[0];
 
-        if (!res.ok) {
-          if (res.status === 401) {
-            speechStatus.textContent = 'Abra esta atividade pelo Canvas para usar o lab de fala.';
-            return;
-          }
-          if (res.status === 429) {
-            const j = await res.json().catch(() => ({}));
-            speechStatus.textContent = (j && j.message) || 'Você atingiu o limite de prática de áudio.';
-
-            if (speechUsage && j && typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
-              const usedMin  = j.usedSeconds / 60;
-              const limitMin = j.limitSeconds / 60;
-              const usedStr  = formatMinutes(usedMin);
-              const limitStr = limitMin.toFixed(0);
-              const label    = `Restante: ${usedStr} / ${limitStr} minutos`;
-              speechUsage.textContent = label;
-              audioUsage = {
-                usedSeconds: j.usedSeconds,
-                limitSeconds: j.limitSeconds,
-                label
-              };
-              if (activeTab === 'speaking') {
-                updateBadge();
-              }
-            }
-            return;
-          }
-          const j = await res.json().catch(() => ({}));
-          console.error('Erro /api/speaking', res.status, j);
-          speechStatus.textContent = 'Erro ao enviar o áudio para correção.';
-          return;
-        }
-
-        const data = await res.json().catch(() => ({}));
-        const {
-          transcript,
-          correct_sentence,
-          feedback_text,
-          audioBase64,
-          usedSeconds,
-          limitSeconds
-        } = data || {};
-
-        let msg = '';
-        if (transcript) {
-          msg += `Você disse (aprox.): "${transcript}"\n`;
-        }
-        if (correct_sentence) {
-          msg += `Frase correta: "${correct_sentence}"\n`;
-        }
-        if (feedback_text) {
-          msg += `Dica: ${feedback_text}`;
-        }
-
-        speechStatus.textContent = msg || 'Correção recebida, mas vazia.';
-
-        if (typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
-          const usedMin  = usedSeconds / 60;
-          const limitMin = limitSeconds / 60;
-          const usedStr  = formatMinutes(usedMin);
-          const limitStr = limitMin.toFixed(0);
-          const label    = `Restante: ${usedStr} / ${limitStr} minutos`;
-          if (speechUsage) speechUsage.textContent = label;
-          audioUsage = { usedSeconds, limitSeconds, label };
-          if (activeTab === 'speaking') {
-            updateBadge();
-          }
-        }
-
-        if (audioBase64 && speechTTS) {
-          const ttsBlob = base64ToBlob(audioBase64, "audio/mpeg");
-          const ttsUrl  = URL.createObjectURL(ttsBlob);
-          speechTTS.src = ttsUrl;
-          speechTTS.style.display = 'block';
-        }
-      } catch (err) {
-        console.error('Erro ao enviar áudio para /api/speaking:', err);
-        speechStatus.textContent = 'Erro de rede ao enviar o áudio.';
-      }
-    }
-
-    async function startRecording(){
-      if (!recStart || !recStop || !speechStatus || !speechAudio) return;
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          speechStatus.textContent = 'Seu navegador não suporta gravação de áudio.';
-          return;
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        chunks = [];
-        isRecording = true;
-        recordStartMs = Date.now();
-
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            chunks.push(e.data);
-          }
-        };
-
-        mediaRecorder.onstop = () => {
-          try {
-            const blob = new Blob(chunks, { type: 'audio/webm' });
-            const url = URL.createObjectURL(blob);
-            speechAudio.src = url;
-            speechAudio.style.display = 'block';
-            if (speechTTS) {
-              speechTTS.style.display = 'none';
-              speechTTS.removeAttribute('src');
-            }
-
-            const durationMs = recordStartMs ? (Date.now() - recordStartMs) : null;
-            recordStartMs = 0;
-
-            speechStatus.textContent = 'Gravação concluída. Enviando para a IA corrigir sua pronúncia...';
-            sendToSpeakingAPI(blob, durationMs);
-          } catch (err) {
-            console.error('Erro ao processar áudio gravado:', err);
-            speechStatus.textContent = 'Erro ao processar a gravação.';
-          }
-        };
-
-        mediaRecorder.start();
-        speechStatus.textContent = 'Gravando... fale em inglês. Clique em Parar quando terminar.';
-        recStart.disabled = true;
-        recStop.disabled = false;
-      } catch (err) {
-        console.error('Erro ao iniciar gravação:', err);
-        speechStatus.textContent = 'Não foi possível acessar o microfone. Verifique as permissões do navegador.';
-      }
-    }
-
-    function stopRecording(){
-      if (!recStart || !recStop || !speechStatus) return;
-      if (mediaRecorder && isRecording) {
-        mediaRecorder.stop();
-        isRecording = false;
-        recStart.disabled = false;
-        recStop.disabled = true;
-      }
-    }
-
-    recStart?.addEventListener('click', startRecording);
-    recStop?.addEventListener('click', stopRecording);
-
-    captureTokenFromURL();
-    loadLocalHistory();
-    atualizarQuota();
-    updateBadge();
+  if (/^feedback\b/i.test(first) && lines[1]) {
+    first = lines[1];
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  first = first.replace(/^[\-\u2022]\s*/, "");
+  first = first.replace(/^[0-9]+\s*[\.\)\-]\s*/, "");
+
+  return first;
+}
+
+function buildSpokenText(correct_sentence, feedback_text) {
+  const sent = (correct_sentence || "").trim();
+  const tip = extractMainTip(feedback_text || "");
+
+  const ptPart = tip
+    ? `Dica rápida: ${tip}`
+    : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
+
+  if (!sent) {
+    return `Check this. ${ptPart}`;
   }
-})();
+
+  return `Check this: ${sent}. ${ptPart}`;
+}
+
+// OBS: o texto final que vira áudio é montado no backend (api/speaking.js),
+// aqui a gente só consome o audioBase64 já pronto.
+
+/* ---------------- EVENTOS ---------------- */
+btn.addEventListener('click', send);
+input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+
+tabChat.addEventListener('click', () => setMode('chat'));
+tabSpeak.addEventListener('click', () => setMode('speaking'));
+
+recordBtn.addEventListener('click', () => {
+  if (!isRecording) startRecording();
+  else stopRecording(true);
+});
+
+cancelRecordBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording(false);
+});
+
+/* ---------- Init ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  captureTokenFromURL();
+  setMode('chat');
+  atualizarQuotaChat();
+  loadHistory();
+});
 </script>
 </body>
 </html>
