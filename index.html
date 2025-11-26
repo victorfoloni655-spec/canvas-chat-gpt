@@ -122,6 +122,7 @@
     flex-direction: column;
   }
 
+  /* CHAT TEXTO */
   .chat {
     padding: 16px;
     display: flex;
@@ -236,13 +237,14 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
   .speak-helper {
     font-size: 14px;
     color: var(--muted);
     margin: 0;
+    flex-shrink: 0;
   }
 
   .speak-controls {
@@ -250,6 +252,7 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    flex-shrink: 0;
   }
 
   #record-timer {
@@ -262,28 +265,31 @@
     font-size: 13px;
     color: var(--muted);
     min-height: 18px;
+    flex-shrink: 0;
   }
 
-  .speak-audio {
-    width: 100%;
-    margin-top: 2px;
-  }
-
-  .speak-feedback {
-    font-size: 14px;
+  .speak-conversation {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    margin-top: 4px;
   }
 
-  .speak-block {
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #0d1117;
-    border: 1px solid var(--border);
+  .speak-msg audio {
+    width: 100%;
+    margin-top: 4px;
   }
 
-  .speak-block strong {
+  .speak-meta {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .speak-meta strong {
     color: var(--text);
   }
 
@@ -332,7 +338,7 @@
         <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <!-- MODO CHAT -->
+      <!-- MODO CHAT (TEXTO) -->
       <div id="chat-section">
         <div id="chat" class="chat"></div>
         <div class="chat-footer">
@@ -356,9 +362,8 @@
 
           <div id="speak-status" class="speak-status"></div>
 
-          <audio id="speak-audio" class="speak-audio" controls style="display:none"></audio>
-
-          <div id="speak-feedback" class="speak-feedback"></div>
+          <!-- conversa de pronúncia (aluno + IA) -->
+          <div id="speak-conversation" class="speak-conversation"></div>
         </div>
       </div>
     </div>
@@ -384,8 +389,7 @@ const recordBtn        = document.getElementById('record-btn');
 const cancelRecordBtn  = document.getElementById('cancel-record-btn');
 const recordTimer      = document.getElementById('record-timer');
 const speakStatus      = document.getElementById('speak-status');
-const speakFeedback    = document.getElementById('speak-feedback');
-const speakAudio       = document.getElementById('speak-audio');
+const speakConversation= document.getElementById('speak-conversation');
 
 /* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
 function captureTokenFromURL(){
@@ -447,7 +451,7 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* ---------------- HISTÓRICO ---------------- */
+/* ---------------- HISTÓRICO (CHAT) ---------------- */
 async function loadHistory() {
   try {
     const t = getToken();
@@ -519,7 +523,7 @@ function updateBadge() {
   }
 }
 
-/* ---------------- MODO (ABA) ---------------- */
+/* ---------------- MODO (ABAS) ---------------- */
 function setMode(mode) {
   currentMode = mode;
   if (mode === 'chat') {
@@ -675,6 +679,10 @@ async function startRecording(){
         speakStatus.textContent = "Processando e enviando para correção...";
         const blob   = new Blob(audioChunks, { type: 'audio/webm' });
         const base64 = await blobToBase64(blob);
+
+        // adiciona bolha do aluno na conversa
+        appendStudentAudioMessage(base64);
+
         await sendSpeakingAudio(base64, durationMs);
       } catch (err) {
         console.error("Erro ao processar/enviar áudio:", err);
@@ -732,33 +740,50 @@ function escapeHtml(str){
     .replace(/'/g,"&#039;");
 }
 
-function showSpeakingResult(data){
-  const { transcript, correct_sentence, feedback_text, audioBase64, usedSeconds, limitSeconds } = data || {};
+/* ---- Conversa do Pronunciation training ---- */
+function appendStudentAudioMessage(base64){
+  const el = document.createElement('div');
+  el.className = 'msg user speak-msg';
+  el.innerHTML = `
+    <strong>Você:</strong>
+    <audio controls src="data:audio/webm;base64,${base64}"></audio>
+  `;
+  speakConversation.appendChild(el);
+  speakConversation.scrollTop = speakConversation.scrollHeight;
+}
+
+function appendAIAudioMessage(data){
+  const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
   const t = transcript || "(não reconhecido)";
   const c = correct_sentence || "(sem frase modelo)";
   const f = feedback_text || "(sem feedback)";
 
-  speakFeedback.innerHTML = `
-    <div class="speak-block">
-      <strong>O que foi entendido:</strong><br>${escapeHtml(t)}
-    </div>
-    <div class="speak-block">
-      <strong>Frase modelo:</strong><br>${escapeHtml(c)}
-    </div>
-    <div class="speak-block">
-      <strong>Feedback de pronúncia:</strong><br>${escapeHtml(f)}
+  const el = document.createElement('div');
+  el.className = 'msg bot speak-msg';
+
+  let audioPart = '';
+  if (audioBase64) {
+    audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
+  }
+
+  el.innerHTML = `
+    <strong>IA:</strong>
+    ${audioPart}
+    <div class="speak-meta">
+      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
+      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
+      <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
 
-  if (audioBase64) {
-    speakAudio.style.display = 'block';
-    speakAudio.src = 'data:audio/mp3;base64,' + audioBase64;
-    speakAudio.load();
-    speakAudio.play().catch(() => {});
-  } else {
-    speakAudio.style.display = 'none';
-  }
+  speakConversation.appendChild(el);
+  speakConversation.scrollTop = speakConversation.scrollHeight;
+}
 
+function showSpeakingResult(data){
+  appendAIAudioMessage(data);
+
+  const { usedSeconds, limitSeconds } = data || {};
   if (typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
     speakingQuota = { usedSeconds, limitSeconds };
     if (currentMode === 'speaking') updateBadge();
@@ -803,47 +828,6 @@ async function sendSpeakingAudio(base64, durationMs){
     speakStatus.textContent = "Erro de rede ao enviar o áudio para correção.";
   }
 }
-
-/* --------- Montagem do áudio falado: "Check this + dica rápida" --------- */
-function extractMainTip(feedback) {
-  if (!feedback) return "";
-
-  const lines = feedback
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(l => l);
-
-  if (!lines.length) return "";
-
-  let first = lines[0];
-
-  if (/^feedback\b/i.test(first) && lines[1]) {
-    first = lines[1];
-  }
-
-  first = first.replace(/^[\-\u2022]\s*/, "");
-  first = first.replace(/^[0-9]+\s*[\.\)\-]\s*/, "");
-
-  return first;
-}
-
-function buildSpokenText(correct_sentence, feedback_text) {
-  const sent = (correct_sentence || "").trim();
-  const tip = extractMainTip(feedback_text || "");
-
-  const ptPart = tip
-    ? `Dica rápida: ${tip}`
-    : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
-
-  if (!sent) {
-    return `Check this. ${ptPart}`;
-  }
-
-  return `Check this: ${sent}. ${ptPart}`;
-}
-
-// OBS: o texto final que vira áudio é montado no backend (api/speaking.js),
-// aqui a gente só consome o audioBase64 já pronto.
 
 /* ---------------- EVENTOS ---------------- */
 btn.addEventListener('click', send);
