@@ -91,7 +91,8 @@ async function transcribeAudio(base64Audio) {
 async function buildFeedback(transcript) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const systemPrompt =
+  // Prompt base (fixo no código)
+  const baseSystem =
     "Você é um professor de inglês especializado em alunos brasileiros (falantes de português do Brasil).\n" +
     "Você recebe a TRANSCRIÇÃO aproximada de um áudio em inglês e deve ajudar o aluno a melhorar.\n\n" +
     "Sua tarefa é:\n" +
@@ -102,35 +103,15 @@ async function buildFeedback(transcript) {
     "5. Corrigir no máximo 3 pontos principais por vez para não sobrecarregar o aluno.\n" +
     "6. Responder o aluno de forma sincera para poder melhorar o nível atual, mas sem desmotivar.\n" +
     "7. Se você não entender o áudio (ruído, baixa qualidade, frase muito confusa), peça educadamente para o aluno repetir, em vez de dar uma resposta vazia.\n\n" +
-    "Ao avaliar a PRONÚNCIA, preste atenção ESPECIAL nestes erros comuns de falantes brasileiros:\n\n" +
-    "1. Sons de TH:\n" +
-    "   - /θ/ como em \"think\", \"thirty\".\n" +
-    "   - /ð/ como em \"this\", \"mother\".\n" +
-    "   Erro comum: virar /t/, /d/, /f/, /s/ (ex: \"tink\" em vez de \"think\").\n\n" +
-    "2. Vogais longas vs curtas:\n" +
-    "   - ship /ʃɪp/ x sheep /ʃiːp/.\n" +
-    "   - live /lɪv/ x leave /liːv/.\n" +
-    "   Brasileiros costumam não alongar as vogais.\n\n" +
-    "3. Vogal /æ/:\n" +
-    "   - \"cat\", \"bad\", \"man\".\n" +
-    "   Erro comum: pronunciar como /ɛ/ (\"bed\") ou /e/ (ex: \"cét\").\n\n" +
-    "4. Consoantes finais:\n" +
-    "   - Sons finais em palavras como \"cat\", \"big\", \"worked\".\n" +
-    "   Erro comum: engolir /t/, /d/, /k/, /p/, /s/, /z/.\n\n" +
-    "5. Plural e 3ª pessoa do singular:\n" +
-    "   - Não pronunciar o -s ou -es no final:\n" +
-    "     \"He work\" em vez de \"He works\" /wɜːrks/.\n" +
-    "     \"Two cat\" em vez de \"two cats\" /kæts/.\n\n" +
-    "6. Terminações -ED:\n" +
-    "   - Três possibilidades: /t/, /d/, /ɪd/.\n" +
-    "   Ex: \"worked\" /wɜːrkt/, \"played\" /pleɪd/, \"wanted\" /ˈwɒntɪd/.\n\n" +
-    "7. Posição da sílaba tônica (stress):\n" +
-    "   - PREsent (substantivo) x preSENT (verbo).\n" +
-    "   - ADvertise x adVERtisement.\n\n" +
-    "8. Ritmo e ligação entre palavras (connected speech):\n" +
-    "   - \"a lot of\" ≈ /ə ˈlɑːɾəv/.\n" +
-    "   - \"want to\" ≈ \"wanna\".\n" +
-    "   Você pode comentar quando o aluno estiver falando muito sílaba por sílaba.\n\n" +
+    "Ao avaliar a PRONÚNCIA, você pode considerar (entre outros) pontos como:\n" +
+    "- Sons de TH (/θ/ em \"think\", /ð/ em \"this\").\n" +
+    "- Vogais longas vs. curtas (ship x sheep, live x leave).\n" +
+    "- Vogal /æ/ (cat, bad, man).\n" +
+    "- Consoantes finais (t, d, k, p, s, z).\n" +
+    "- Plural e 3ª pessoa do singular na pronúncia (he works, two cats).\n" +
+    "- Terminações -ED (/t/, /d/, /ɪd/).\n" +
+    "- Posição da sílaba tônica.\n" +
+    "- Ritmo e connected speech.\n\n" +
     "Sempre que possível, no feedback:\n" +
     "- Liste de 1 a 3 palavras em que a pronúncia possa melhorar.\n" +
     "- Mostre a forma correta + IPA americano.\n" +
@@ -142,12 +123,18 @@ async function buildFeedback(transcript) {
     "  \"correct_sentence\": \"frase corrigida e natural em inglês\",\n" +
     "  \"feedback_pt\": \"texto em português com as dicas de pronúncia (máx. 3 pontos principais)\"\n" +
     "}\n" +
-    "Não inclua comentários adicionais, nem texto fora desse JSON.";
+    "Não inclua comentários adicionais, nem texto fora desse JSON.\n\n";
+
+  // Complemento vindo da Vercel (você ajusta sem tocar no código)
+  const extra = process.env.SPEAKING_FEEDBACK_PROMPT_PT || "";
+
+  const systemPrompt = baseSystem + (extra ? ("\n" + extra) : "");
 
   const userPrompt =
     `Transcrição aproximada da fala do aluno:\n"${transcript}".\n\n` +
     "1) Deduz a frase correta em inglês.\n" +
-    "2) Depois, no campo feedback_pt, dê as dicas de pronúncia seguindo as instruções.";
+    "2) Preencha o campo correct_sentence com essa frase.\n" +
+    "3) No campo feedback_pt, dê as dicas de pronúncia seguindo as instruções.";
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -198,7 +185,7 @@ async function buildFeedback(transcript) {
   return { correct_sentence, feedback_text };
 }
 
-// --------- OpenAI: TTS (voz da frase + dica) ---------
+// --------- OpenAI: TTS (voz com "Check this" + dica rápida) ---------
 
 async function synthesizeSpeech(text) {
   if (!text) return null;
@@ -228,24 +215,6 @@ async function synthesizeSpeech(text) {
   return buf.toString("base64");
 }
 
-// Monta o texto que a IA vai falar no áudio:
-// "Check this: <frase correta>. Dica rápida: <uma dica curtinha em PT>"
-function buildSpokenText(correct_sentence, feedback_text) {
-  const sent = (correct_sentence || "").trim();
-  const tip = extractMainTip(feedback_text || "");
-
-  // se não conseguir extrair nada decente, usa uma dica genérica
-  const ptPart = tip
-    ? `Dica rápida: ${tip}`
-    : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
-
-  if (!sent) {
-    return `Check this. ${ptPart}`;
-  }
-
-  return `Check this: ${sent}. ${ptPart}`;
-}
-
 // Pega APENAS a dica principal a partir do feedback em texto
 function extractMainTip(feedback) {
   if (!feedback) return "";
@@ -272,6 +241,24 @@ function extractMainTip(feedback) {
   first = first.replace(/^[0-9]+\s*[\.\)\-]\s*/, "");
 
   return first;
+}
+
+// Monta o texto que a IA vai falar no áudio:
+// "Check this: <frase correta>. Dica rápida: <uma dica curtinha em PT>"
+function buildSpokenText(correct_sentence, feedback_text) {
+  const sent = (correct_sentence || "").trim();
+  const tip = extractMainTip(feedback_text || "");
+
+  // se não conseguir extrair nada decente, usa uma dica genérica
+  const ptPart = tip
+    ? `Dica rápida: ${tip}`
+    : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
+
+  if (!sent) {
+    return `Check this. ${ptPart}`;
+  }
+
+  return `Check this: ${sent}. ${ptPart}`;
 }
 
 // --------- handler principal ---------
@@ -352,7 +339,7 @@ export default async function handler(req, res) {
     const transcript = await transcribeAudio(audio);
     const { correct_sentence, feedback_text } = await buildFeedback(transcript || "");
 
-    // >>> AQUI entra o novo comportamento do áudio
+    // texto final que vira áudio: "Check this: ... Dica rápida: ..."
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
