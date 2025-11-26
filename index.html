@@ -361,7 +361,7 @@
 <script>
 const CHAT_URL    = '/api/chat';
 const QUOTA_URL   = '/api/quota';
-const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
+const HISTORY_URL = '/api/history';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -440,41 +440,29 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* ---------- HISTÓRICO CHAT (localStorage) ---------- */
-function saveLocalHistory(role, content) {
+/* ---------- HISTÓRICO CHAT ---------- */
+async function loadHistory() {
   try {
-    const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-    let arr = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) arr = parsed;
-    }
-    arr.push({ role, content, ts: Date.now() });
-    if (arr.length > 200) {
-      arr = arr.slice(arr.length - 200);
-    }
-    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(arr));
-  } catch (e) {
-    console.error('Erro ao salvar histórico local:', e);
-  }
-}
+    const t = getToken();
+    const url = t ? `${HISTORY_URL}?t=${encodeURIComponent(t)}` : HISTORY_URL;
 
-function loadLocalHistory() {
-  try {
-    const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return;
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
 
-    arr.forEach(m => {
+    if (!res.ok) return;
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    items.forEach(m => {
       if (!m || typeof m.content !== 'string') return;
       const who = m.role === 'user' ? 'user' : 'bot';
       addMsg(m.content, who);
-      const role = who === 'user' ? 'user' : 'assistant';
-      messages.push({ role, content: m.content });
     });
-  } catch (e) {
-    console.error('Erro ao carregar histórico local:', e);
+  } catch (err) {
+    console.error('Erro ao carregar histórico:', err);
   }
 }
 
@@ -544,7 +532,6 @@ async function send(){
   const text = input.value.trim();
   if(!text) return;
   addMsg(text, 'user');
-  saveLocalHistory('user', text);
   input.value = '';
   btn.disabled = true;
 
@@ -582,7 +569,6 @@ async function send(){
     const data = await res.json();
     const reply = data.reply || "(sem conteúdo)";
     addMsg(reply, 'bot');
-    saveLocalHistory('assistant', reply);
     messages.push({ role: "assistant", content: reply });
 
     btn.disabled = false;
@@ -811,7 +797,7 @@ async function sendSpeakingAudio(base64, durationMs){
     }
 
     if (!res.ok) {
-      const txt = await res.text().catch(() => "";
+      const txt = await res.text().catch(() => "");
       console.error("Erro /api/speaking", res.status, txt);
       speakStatus.textContent = "Erro ao enviar o áudio para correção.";
       return;
@@ -846,7 +832,7 @@ cancelRecordBtn.addEventListener('click', () => {
 captureTokenFromURL();
 setMode('chat');       // garante que só o chat aparece na 1ª carga
 atualizarQuotaChat();
-loadLocalHistory();
+loadHistory();
 </script>
 </body>
 </html>
