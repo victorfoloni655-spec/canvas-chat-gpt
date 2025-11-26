@@ -234,12 +234,12 @@ function buildSpokenText(correct_sentence, feedback_text) {
   const sent = (correct_sentence || "").trim();
   let tip = (feedback_text || "").trim();
 
-  // tenta pegar só a primeira frase da dica, pra ficar curto
   if (tip) {
-    const dotIndex = tip.indexOf(".");
-    if (dotIndex > 0 && dotIndex < 220) {
-      tip = tip.slice(0, dotIndex + 1);
-    } else if (tip.length > 220) {
+    // remove numeração tipo "1. " ou "1) " do começo
+    tip = tip.replace(/^[0-9]+\s*[\.\)]\s*/, "");
+
+    // agora só limita o tamanho, sem tentar achar a primeira frase numerada
+    if (tip.length > 220) {
       tip = tip.slice(0, 220) + "...";
     }
   }
