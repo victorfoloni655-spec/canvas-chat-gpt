@@ -229,31 +229,49 @@ async function synthesizeSpeech(text) {
 }
 
 // Monta o texto que a IA vai falar no áudio:
-// "Check this: <frase correta>. <dica curta em português>"
+// "Check this: <frase correta>. Dica rápida: <uma dica curtinha em PT>"
 function buildSpokenText(correct_sentence, feedback_text) {
   const sent = (correct_sentence || "").trim();
-  let tip = (feedback_text || "").trim();
+  const tip = extractMainTip(feedback_text || "");
 
-  if (tip) {
-    // remove numeração tipo "1. " ou "1) " do começo
-    tip = tip.replace(/^[0-9]+\s*[\.\)]\s*/, "");
-
-    // agora só limita o tamanho, sem tentar achar a primeira frase numerada
-    if (tip.length > 220) {
-      tip = tip.slice(0, 220) + "...";
-    }
-  }
-
-  if (!tip) {
-    tip = "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
-  }
+  // se não conseguir extrair nada decente, usa uma dica genérica
+  const ptPart = tip
+    ? `Dica rápida: ${tip}`
+    : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
 
   if (!sent) {
-    return `Check this. ${tip}`;
+    return `Check this. ${ptPart}`;
   }
 
-  // inglês + dica em português
-  return `Check this: ${sent}. ${tip}`;
+  return `Check this: ${sent}. ${ptPart}`;
+}
+
+// Pega APENAS a dica principal a partir do feedback em texto
+function extractMainTip(feedback) {
+  if (!feedback) return "";
+
+  // separa em linhas e limpa
+  const lines = feedback
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l);
+
+  if (!lines.length) return "";
+
+  let first = lines[0];
+
+  // se a primeira linha for algo tipo "Feedback:" e houver outra, usa a segunda
+  if (/^feedback\b/i.test(first) && lines[1]) {
+    first = lines[1];
+  }
+
+  // remove bullets simples: "-", "•"
+  first = first.replace(/^[\-\u2022]\s*/, "");
+
+  // remove numeração tipo "1.", "1)", "1 -" no começo
+  first = first.replace(/^[0-9]+\s*[\.\)\-]\s*/, "");
+
+  return first;
 }
 
 // --------- handler principal ---------
