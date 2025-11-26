@@ -361,7 +361,8 @@
 <script>
 const CHAT_URL    = '/api/chat';
 const QUOTA_URL   = '/api/quota';
-const LOCAL_HISTORY_KEY = 'ia_english_history_v1';
+const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
+const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -475,6 +476,114 @@ function loadLocalHistory() {
     });
   } catch (e) {
     console.error('Erro ao carregar histórico local:', e);
+  }
+}
+
+/* ---------- HISTÓRICO SPEAKING (localStorage) ---------- */
+function saveSpeakHistory(entry) {
+  try {
+    const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+    let arr = [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) arr = parsed;
+    }
+    arr.push(entry);
+    // limita a ~20 interações (user+ia = 40 registros)
+    if (arr.length > 40) {
+      arr = arr.slice(arr.length - 40);
+    }
+    localStorage.setItem(LOCAL_SPEAK_HISTORY_KEY, JSON.stringify(arr));
+  } catch (e) {
+    console.error('Erro ao salvar histórico speaking:', e);
+  }
+}
+
+/* Renderização pura (sem salvar) */
+function renderStudentAudioMessage(base64){
+  const el = document.createElement('div');
+  el.className = 'msg user speak-msg';
+  el.innerHTML = `
+    <strong>Você:</strong>
+    <audio controls src="data:audio/webm;base64,${base64}"></audio>
+  `;
+  speakConversation.appendChild(el);
+  speakConversation.scrollTop = speakConversation.scrollHeight;
+}
+
+function renderAIAudioMessage(data){
+  const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
+  const t = transcript || "(não reconhecido)";
+  const c = correct_sentence || "(sem frase modelo)";
+  const f = feedback_text || "(sem feedback)";
+
+  const el = document.createElement('div');
+  el.className = 'msg bot speak-msg';
+
+  let audioPart = '';
+  if (audioBase64) {
+    audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
+  }
+
+  el.innerHTML = `
+    <strong>IA:</strong>
+    ${audioPart}
+    <div class="speak-meta">
+      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
+      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
+      <strong>Feedback:</strong> ${escapeHtml(f)}
+    </div>
+  `;
+
+  speakConversation.appendChild(el);
+  speakConversation.scrollTop = speakConversation.scrollHeight;
+}
+
+/* Versões que renderizam + salvam (para uso em tempo real) */
+function appendStudentAudioMessage(base64){
+  renderStudentAudioMessage(base64);
+  saveSpeakHistory({
+    role: 'user',
+    audioBase64: base64,
+    ts: Date.now()
+  });
+}
+
+function appendAIAudioMessage(data){
+  renderAIAudioMessage(data);
+  const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
+  saveSpeakHistory({
+    role: 'assistant',
+    transcript: transcript || null,
+    correct_sentence: correct_sentence || null,
+    feedback_text: feedback_text || null,
+    audioBase64: audioBase64 || null,
+    ts: Date.now()
+  });
+}
+
+function loadSpeakHistory() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return;
+
+    arr.forEach(item => {
+      if (!item || !item.role) return;
+      if (item.role === 'user' && item.audioBase64) {
+        renderStudentAudioMessage(item.audioBase64);
+      } else if (item.role === 'assistant') {
+        renderAIAudioMessage({
+          transcript: item.transcript,
+          correct_sentence: item.correct_sentence,
+          feedback_text: item.feedback_text,
+          audioBase64: item.audioBase64
+        });
+      }
+    });
+  } catch (e) {
+    console.error('Erro ao carregar histórico speaking:', e);
   }
 }
 
@@ -738,45 +847,6 @@ function escapeHtml(str){
     .replace(/'/g,"&#039;");
 }
 
-function appendStudentAudioMessage(base64){
-  const el = document.createElement('div');
-  el.className = 'msg user speak-msg';
-  el.innerHTML = `
-    <strong>Você:</strong>
-    <audio controls src="data:audio/webm;base64,${base64}"></audio>
-  `;
-  speakConversation.appendChild(el);
-  speakConversation.scrollTop = speakConversation.scrollHeight;
-}
-
-function appendAIAudioMessage(data){
-  const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
-  const t = transcript || "(não reconhecido)";
-  const c = correct_sentence || "(sem frase modelo)";
-  const f = feedback_text || "(sem feedback)";
-
-  const el = document.createElement('div');
-  el.className = 'msg bot speak-msg';
-
-  let audioPart = '';
-  if (audioBase64) {
-    audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
-  }
-
-  el.innerHTML = `
-    <strong>IA:</strong>
-    ${audioPart}
-    <div class="speak-meta">
-      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
-      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
-      <strong>Feedback:</strong> ${escapeHtml(f)}
-    </div>
-  `;
-
-  speakConversation.appendChild(el);
-  speakConversation.scrollTop = speakConversation.scrollHeight;
-}
-
 function showSpeakingResult(data){
   appendAIAudioMessage(data);
 
@@ -847,6 +917,7 @@ captureTokenFromURL();
 setMode('chat');       // garante que só o chat aparece na 1ª carga
 atualizarQuotaChat();
 loadLocalHistory();
+loadSpeakHistory();
 </script>
 </body>
 </html>
