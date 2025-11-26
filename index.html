@@ -25,7 +25,8 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 16px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font: 16px/1.45 system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", Roboto, Arial, sans-serif;
   }
 
   .wrap {
@@ -111,18 +112,15 @@
     font-weight: 600;
   }
 
-  .hidden {
-    display: none;
-  }
-
-  #chat-section, #speak-section {
+  /* CHAT TEXTO */
+  #chat-section,
+  #speak-section {
     flex: 1 1 auto;
     min-height: 0;
-    display: flex;
+    display: flex;           /* o JS troca entre flex/none */
     flex-direction: column;
   }
 
-  /* CHAT TEXTO */
   .chat {
     padding: 16px;
     display: flex;
@@ -293,14 +291,10 @@
     color: var(--text);
   }
 
-  /* Ajustes para telas menores (mobile) */
+  /* Mobile */
   @media (max-width: 600px) {
-    .wrap {
-      padding: 8px;
-    }
-    .header {
-      padding: 10px 12px;
-    }
+    .wrap { padding: 8px; }
+    .header { padding: 10px 12px; }
     .chat-footer {
       padding: 10px 10px 12px;
       gap: 6px;
@@ -313,12 +307,8 @@
       padding: 10px 12px;
       font-size: 15px;
     }
-    .msg {
-      max-width: 90%;
-    }
-    .mode-switch {
-      padding-inline: 12px;
-    }
+    .msg { max-width: 90%; }
+    .mode-switch { padding-inline: 12px; }
   }
 </style>
 
@@ -338,7 +328,7 @@
         <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <!-- MODO CHAT (TEXTO) -->
+      <!-- TELA DE CHAT (apenas texto) -->
       <div id="chat-section">
         <div id="chat" class="chat"></div>
         <div class="chat-footer">
@@ -347,8 +337,8 @@
         </div>
       </div>
 
-      <!-- MODO SPEAKING / PRONUNCIATION -->
-      <div id="speak-section" class="hidden">
+      <!-- TELA DE PRONÚNCIA (apenas voz) -->
+      <div id="speak-section" style="display:none">
         <div class="speak-box">
           <p class="speak-helper">
             Grave uma frase em inglês para treinar sua pronúncia. Você receberá a frase modelo, feedback escrito e um áudio curto com correção.
@@ -362,7 +352,6 @@
 
           <div id="speak-status" class="speak-status"></div>
 
-          <!-- conversa de pronúncia (aluno + IA) -->
           <div id="speak-conversation" class="speak-conversation"></div>
         </div>
       </div>
@@ -391,7 +380,7 @@ const recordTimer      = document.getElementById('record-timer');
 const speakStatus      = document.getElementById('speak-status');
 const speakConversation= document.getElementById('speak-conversation');
 
-/* ---------- TOKEN FALLBACK (funciona em iframe iOS/Android) ---------- */
+/* ---------- TOKEN LTI ---------- */
 function captureTokenFromURL(){
   const u = new URL(window.location.href);
   const t = u.searchParams.get('t');
@@ -406,7 +395,7 @@ function getToken(){
   return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
 }
 
-/* ---------------- ESTADO GLOBAL ---------------- */
+/* ---------- ESTADO ---------- */
 const messages = [
   { role: "system", content: "Você é um tutor de ingles que vai tirar duvidas dos alunos, seja claro e objetivo." }
 ];
@@ -415,7 +404,7 @@ let currentMode   = 'chat';
 let chatQuota     = null;
 let speakingQuota = null;
 
-/* ---------------- UI helpers (chat) ---------------- */
+/* ---------- UI CHAT ---------- */
 function addMsg(text, who){
   const el = document.createElement('div');
   el.className = `msg ${who}`;
@@ -451,7 +440,7 @@ function addCTAPackages(packages){
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* ---------------- HISTÓRICO (CHAT) ---------------- */
+/* ---------- HISTÓRICO CHAT ---------- */
 async function loadHistory() {
   try {
     const t = getToken();
@@ -462,9 +451,7 @@ async function loadHistory() {
       credentials: 'include',
     });
 
-    if (!res.ok) {
-      return;
-    }
+    if (!res.ok) return;
 
     const data = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
@@ -479,7 +466,7 @@ async function loadHistory() {
   }
 }
 
-/* ---------------- QUOTA CHAT ---------------- */
+/* ---------- QUOTA CHAT ---------- */
 async function atualizarQuotaChat(){
   try {
     const t = getToken();
@@ -495,14 +482,14 @@ async function atualizarQuotaChat(){
     }
     const { remaining, limit } = await r.json();
     chatQuota = { remaining, limit };
-    if (currentMode === 'chat') updateBadge();
+    updateBadge();
   } catch (e) {
     console.error('Erro quota chat:', e);
     if (currentMode === 'chat') badge.textContent = 'quota indisponível';
   }
 }
 
-/* ---------------- BADGE (TOPO) ---------------- */
+/* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
     if (chatQuota) {
@@ -523,24 +510,24 @@ function updateBadge() {
   }
 }
 
-/* ---------------- MODO (ABAS) ---------------- */
+/* ---------- TROCA DE TELA (CHAT x PRONUNCIATION) ---------- */
 function setMode(mode) {
   currentMode = mode;
   if (mode === 'chat') {
     tabChat.classList.add('active');
     tabSpeak.classList.remove('active');
-    chatSection.classList.remove('hidden');
-    speakSection.classList.add('hidden');
+    chatSection.style.display  = 'flex';
+    speakSection.style.display = 'none';
   } else {
     tabChat.classList.remove('active');
     tabSpeak.classList.add('active');
-    chatSection.classList.add('hidden');
-    speakSection.classList.remove('hidden');
+    chatSection.style.display  = 'none';
+    speakSection.style.display = 'flex';
   }
   updateBadge();
 }
 
-/* ---------------- ENVIO CHAT ---------------- */
+/* ---------- ENVIO CHAT ---------- */
 async function send(){
   const text = input.value.trim();
   if(!text) return;
@@ -593,7 +580,7 @@ async function send(){
   }
 }
 
-/* ---------- Correções de teclado/viewport no mobile (chat) ---------- */
+/* ---------- Fix teclado mobile (chat) ---------- */
 (function fixViewportForKeyboard(){
   const vv = window.visualViewport;
   if (!vv || !chat) return;
@@ -613,7 +600,7 @@ input.addEventListener('focus', () => {
   }, 250);
 });
 
-/* ---------------- SPEAKING / PRONUNCIATION ---------------- */
+/* ---------- SPEAKING / PRONUNCIATION ---------- */
 let mediaRecorder = null;
 let audioChunks   = [];
 let isRecording   = false;
@@ -663,7 +650,6 @@ async function startRecording(){
       }
       const durationMs = recordStart ? (Date.now() - recordStart) : 0;
 
-      // para as tracks do microfone
       if (mediaRecorder && mediaRecorder.stream) {
         mediaRecorder.stream.getTracks().forEach(tr => tr.stop());
       }
@@ -680,9 +666,7 @@ async function startRecording(){
         const blob   = new Blob(audioChunks, { type: 'audio/webm' });
         const base64 = await blobToBase64(blob);
 
-        // adiciona bolha do aluno na conversa
         appendStudentAudioMessage(base64);
-
         await sendSpeakingAudio(base64, durationMs);
       } catch (err) {
         console.error("Erro ao processar/enviar áudio:", err);
@@ -740,7 +724,6 @@ function escapeHtml(str){
     .replace(/'/g,"&#039;");
 }
 
-/* ---- Conversa do Pronunciation training ---- */
 function appendStudentAudioMessage(base64){
   const el = document.createElement('div');
   el.className = 'msg user speak-msg';
@@ -786,7 +769,7 @@ function showSpeakingResult(data){
   const { usedSeconds, limitSeconds } = data || {};
   if (typeof usedSeconds === 'number' && typeof limitSeconds === 'number') {
     speakingQuota = { usedSeconds, limitSeconds };
-    if (currentMode === 'speaking') updateBadge();
+    updateBadge();
   }
 }
 
@@ -808,7 +791,7 @@ async function sendSpeakingAudio(base64, durationMs){
       speakStatus.textContent = j.message || "Limite mensal de prática de áudio atingido.";
       if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
         speakingQuota = { usedSeconds: j.usedSeconds, limitSeconds: j.limitSeconds };
-        if (currentMode === 'speaking') updateBadge();
+        updateBadge();
       }
       return;
     }
@@ -829,7 +812,7 @@ async function sendSpeakingAudio(base64, durationMs){
   }
 }
 
-/* ---------------- EVENTOS ---------------- */
+/* ---------- EVENTOS ---------- */
 btn.addEventListener('click', send);
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
 
@@ -845,13 +828,11 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
-/* ---------- Init ---------- */
-document.addEventListener('DOMContentLoaded', () => {
-  captureTokenFromURL();
-  setMode('chat');
-  atualizarQuotaChat();
-  loadHistory();
-});
+/* ---------- INIT ---------- */
+captureTokenFromURL();
+setMode('chat');       // garante que só o chat aparece na 1ª carga
+atualizarQuotaChat();
+loadHistory();
 </script>
 </body>
 </html>
