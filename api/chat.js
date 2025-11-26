@@ -1,6 +1,6 @@
 // /api/chat.js
-// Chat + limitador mensal no Redis (por usuário).
-// Identidade: cookie lti_user (desktop) OU token 't' (JWT) no body — funciona em iframe (iOS/Android).
+// Chat + limitador mensal + histórico simples no Redis.
+// Identidade: cookie lti_user (desktop) OU token 't' (JWT) no body.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -12,13 +12,14 @@ const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
 const QUOTA_PREFIX   = process.env.QUOTA_PREFIX || "quota";
 
-// prefixo para histórico (pode configurar em env: HISTORY_PREFIX=history_gpt)
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
-
 // Links de checkout (opcionais)
 const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
+
+// Histórico
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40); // 20 turnos (user+bot)
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -37,17 +38,16 @@ function monthKey(userId) {
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
-// chave do histórico
-function historyKey(userId) {
-  return `${HISTORY_PREFIX}:${userId}`;
-}
-
 // incrementa e expira no 1º dia do próximo mês (UTC)
 async function incrMonthlyAndCheck(key, limit) {
   const used = await redis.incr(key);
   if (used === 1) {
     const now = new Date();
-    const expireAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) / 1000;
+    const expireAt = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + 1,
+      1
+    ) / 1000;
     await redis.expireat(key, expireAt);
   }
   return { used, blocked: used > limit };
@@ -63,22 +63,35 @@ async function getUserIdFromToken(t) {
   }
 }
 
-// salva uma entrada no histórico (não quebra o chat se falhar)
-async function appendHistory(userId, role, content) {
+// ====== HISTÓRICO ======
+function historyKey(userId) {
+  return `${HISTORY_PREFIX}:${userId}`;
+}
+
+// salva um turno simples: última pergunta do aluno + resposta da IA
+async function appendHistory(userId, userText, botText) {
   try {
-    if (!userId || !content) return;
     const key = historyKey(userId);
-    const entry = JSON.stringify({
-      role,
-      content,
-      ts: Date.now(),
+    const now = Date.now();
+
+    const entryUser = JSON.stringify({
+      role: "user",
+      content: String(userText || ""),
+      ts: now,
     });
-    // guarda as MAIS recentes primeiro
-    await redis.lpush(key, entry);
-    // mantém só as últimas 100 entradas
-    await redis.ltrim(key, 0, 99);
+
+    const entryBot = JSON.stringify({
+      role: "assistant",
+      content: String(botText || ""),
+      ts: now,
+    });
+
+    // adiciona user e bot de uma vez
+    await redis.rpush(key, entryUser, entryBot);
+    // mantém só os últimos N itens
+    await redis.ltrim(key, -HISTORY_MAX, -1);
   } catch (e) {
-    console.error("HISTORY save error:", e);
+    console.error("Erro ao salvar histórico:", e);
   }
 }
 
@@ -126,13 +139,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
-    // pega a última mensagem do aluno (role: "user") para salvar no histórico
-    const lastUserMsg = [...messages]
-      .reverse()
-      .find(m => m && m.role === "user" && typeof m.content === "string")
-      ?.content || null;
-
-    // Identidade do aluno: cookie LTI -> token 't' -> (recusa sem identidade)
+    // Identidade do aluno: cookie LTI -> token 't'
     const cookies = parseCookies(req.headers.cookie || "");
     let counterId = cookies["lti_user"];
 
@@ -141,7 +148,6 @@ export default async function handler(req, res) {
       if (fromT) counterId = fromT;
     }
 
-    // ❌ SEM fallback por IP ou 'user' do body (obrigamos vir do Canvas)
     if (!counterId) {
       return res.status(401).json({
         error: "no_user",
@@ -149,7 +155,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Limite mensal (conta no envio)
+    // Limite mensal
     const key = monthKey(counterId);
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
     if (blocked) {
@@ -167,14 +173,18 @@ export default async function handler(req, res) {
       });
     }
 
+    // Texto da última mensagem do aluno (pra salvar no histórico)
+    const lastUserMsg = messages
+      .slice()
+      .reverse()
+      .find(m => m.role === "user");
+    const userTextForHistory = lastUserMsg?.content || "";
+
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
-    // Salva histórico (pergunta do aluno + resposta da IA)
-    if (lastUserMsg) {
-      await appendHistory(counterId, "user", lastUserMsg);
-    }
-    await appendHistory(counterId, "assistant", reply);
+    // Salva histórico (não bloqueia a resposta se der erro)
+    await appendHistory(counterId, userTextForHistory, reply);
 
     return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
   } catch (e) {
