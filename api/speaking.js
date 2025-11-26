@@ -260,7 +260,8 @@ export default async function handler(req, res) {
       throw new Error("OPENAI_API_KEY não configurada.");
     }
 
-const { correct_sentence, feedback_text } = await buildFeedback(transcript || "");
+    const transcript = await transcribeAudio(audio);
+    const { correct_sentence, feedback_text } = await buildFeedback(transcript || "");
 
 // Frase que vai para o TTS (em inglês)
 const spokenText = `Correct sentence: ${correct_sentence}. Now repeat: ${correct_sentence}.`;
