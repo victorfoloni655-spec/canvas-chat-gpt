@@ -14,7 +14,7 @@ const redis = new Redis({
 
 const SPEAKING_PREFIX = process.env.SPEAKING_PREFIX || "speaking";
 
-// prioridade: segundos -> minutos -> 20 min
+// prioridade: segundos -> minutos -> 20 min (padrão)
 const SPEAKING_LIMIT_SECONDS =
   Number(process.env.SPEAKING_MONTHLY_LIMIT_SECONDS) ||
   (Number(process.env.SPEAKING_MONTHLY_LIMIT_MINUTES || 20) * 60);
@@ -49,7 +49,7 @@ async function readJson(req) {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-// --------- OpenAI helpers ---------
+// --------- OpenAI: transcrição (Whisper) ---------
 
 async function transcribeAudio(base64Audio) {
   if (!OPENAI_API_KEY) {
@@ -86,26 +86,68 @@ async function transcribeAudio(base64Audio) {
   return (data.text || "").trim();
 }
 
+// --------- OpenAI: feedback de pronúncia ---------
+
 async function buildFeedback(transcript) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  // Parte fixa
-  const baseSystem =
+  const systemPrompt =
     "Você é um professor de inglês especializado em alunos brasileiros (falantes de português do Brasil).\n" +
     "Você recebe a TRANSCRIÇÃO aproximada de um áudio em inglês e deve ajudar o aluno a melhorar.\n\n" +
     "Sua tarefa é:\n" +
-    "1) Deduzir qual deveria ser a frase correta em inglês.\n" +
-    "2) Dar um feedback curto em português sobre pronúncia.\n\n";
-
-  // Parte flexível, vinda da Vercel (você já preencheu na SPEAKING_FEEDBACK_PROMPT_PT)
-  const extra = process.env.SPEAKING_FEEDBACK_PROMPT_PT || "";
-
-  const systemPrompt = baseSystem + extra;
+    "1. Confirmar o que você entendeu (em inglês, frase corrigida).\n" +
+    "2. Corrigir a frase, deixando-a natural em inglês.\n" +
+    "3. Focar em erros típicos de brasileiros na pronúncia.\n" +
+    "4. Explicar em português, de forma simples.\n" +
+    "5. Corrigir no máximo 3 pontos principais por vez para não sobrecarregar o aluno.\n" +
+    "6. Responder o aluno de forma sincera para poder melhorar o nível atual, mas sem desmotivar.\n" +
+    "7. Se você não entender o áudio (ruído, baixa qualidade, frase muito confusa), peça educadamente para o aluno repetir, em vez de dar uma resposta vazia.\n\n" +
+    "Ao avaliar a PRONÚNCIA, preste atenção ESPECIAL nestes erros comuns de falantes brasileiros:\n\n" +
+    "1. Sons de TH:\n" +
+    "   - /θ/ como em \"think\", \"thirty\".\n" +
+    "   - /ð/ como em \"this\", \"mother\".\n" +
+    "   Erro comum: virar /t/, /d/, /f/, /s/ (ex: \"tink\" em vez de \"think\").\n\n" +
+    "2. Vogais longas vs curtas:\n" +
+    "   - ship /ʃɪp/ x sheep /ʃiːp/.\n" +
+    "   - live /lɪv/ x leave /liːv/.\n" +
+    "   Brasileiros costumam não alongar as vogais.\n\n" +
+    "3. Vogal /æ/:\n" +
+    "   - \"cat\", \"bad\", \"man\".\n" +
+    "   Erro comum: pronunciar como /ɛ/ (\"bed\") ou /e/ (ex: \"cét\").\n\n" +
+    "4. Consoantes finais:\n" +
+    "   - Sons finais em palavras como \"cat\", \"big\", \"worked\".\n" +
+    "   Erro comum: engolir /t/, /d/, /k/, /p/, /s/, /z/.\n\n" +
+    "5. Plural e 3ª pessoa do singular:\n" +
+    "   - Não pronunciar o -s ou -es no final:\n" +
+    "     \"He work\" em vez de \"He works\" /wɜːrks/.\n" +
+    "     \"Two cat\" em vez de \"two cats\" /kæts/.\n\n" +
+    "6. Terminações -ED:\n" +
+    "   - Três possibilidades: /t/, /d/, /ɪd/.\n" +
+    "   Ex: \"worked\" /wɜːrkt/, \"played\" /pleɪd/, \"wanted\" /ˈwɒntɪd/.\n\n" +
+    "7. Posição da sílaba tônica (stress):\n" +
+    "   - PREsent (substantivo) x preSENT (verbo).\n" +
+    "   - ADvertise x adVERtisement.\n\n" +
+    "8. Ritmo e ligação entre palavras (connected speech):\n" +
+    "   - \"a lot of\" ≈ /ə ˈlɑːɾəv/.\n" +
+    "   - \"want to\" ≈ \"wanna\".\n" +
+    "   Você pode comentar quando o aluno estiver falando muito sílaba por sílaba.\n\n" +
+    "Sempre que possível, no feedback:\n" +
+    "- Liste de 1 a 3 palavras em que a pronúncia possa melhorar.\n" +
+    "- Mostre a forma correta + IPA americano.\n" +
+    "- Explique em português, de forma direta e encorajadora.\n\n" +
+    "FORMATO DA RESPOSTA (IMPORTANTE!):\n" +
+    "Responda APENAS em JSON, sem nenhum texto antes ou depois.\n" +
+    "Use exatamente este formato:\n" +
+    "{\n" +
+    "  \"correct_sentence\": \"frase corrigida e natural em inglês\",\n" +
+    "  \"feedback_pt\": \"texto em português com as dicas de pronúncia (máx. 3 pontos principais)\"\n" +
+    "}\n" +
+    "Não inclua comentários adicionais, nem texto fora desse JSON.";
 
   const userPrompt =
     `Transcrição aproximada da fala do aluno:\n"${transcript}".\n\n` +
     "1) Deduz a frase correta em inglês.\n" +
-    "2) Depois, no feedback em português, foque em 1 a 3 pontos de pronúncia importantes para esse caso.";
+    "2) Depois, no campo feedback_pt, dê as dicas de pronúncia seguindo as instruções.";
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -131,7 +173,6 @@ async function buildFeedback(transcript) {
   const json = await resp.json();
   const content = json?.choices?.[0]?.message?.content || "";
 
-  // TENTAR interpretar como JSON, mas com fallback seguro
   let parsed;
   try {
     parsed = JSON.parse(content);
@@ -150,12 +191,14 @@ async function buildFeedback(transcript) {
       feedback_text = parsed.feedback_pt;
     }
   } else {
-    // se o modelo não mandou JSON, usamos o texto bruto como feedback
+    // fallback: se o modelo não respeitar o JSON, devolve o texto bruto como feedback
     feedback_text = content;
   }
 
   return { correct_sentence, feedback_text };
 }
+
+// --------- OpenAI: TTS (voz da frase + dica) ---------
 
 async function synthesizeSpeech(text) {
   if (!text) return null;
@@ -183,6 +226,34 @@ async function synthesizeSpeech(text) {
 
   const buf = Buffer.from(await resp.arrayBuffer());
   return buf.toString("base64");
+}
+
+// Monta o texto que a IA vai falar no áudio:
+// "Check this: <frase correta>. <dica curta em português>"
+function buildSpokenText(correct_sentence, feedback_text) {
+  const sent = (correct_sentence || "").trim();
+  let tip = (feedback_text || "").trim();
+
+  // tenta pegar só a primeira frase da dica, pra ficar curto
+  if (tip) {
+    const dotIndex = tip.indexOf(".");
+    if (dotIndex > 0 && dotIndex < 220) {
+      tip = tip.slice(0, dotIndex + 1);
+    } else if (tip.length > 220) {
+      tip = tip.slice(0, 220) + "...";
+    }
+  }
+
+  if (!tip) {
+    tip = "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
+  }
+
+  if (!sent) {
+    return `Check this. ${tip}`;
+  }
+
+  // inglês + dica em português
+  return `Check this: ${sent}. ${tip}`;
 }
 
 // --------- handler principal ---------
@@ -221,7 +292,7 @@ export default async function handler(req, res) {
     if (typeof durationMs === "number" && durationMs > 0) {
       secondsThisCall = Math.round(durationMs / 1000);
     } else {
-      // fallback bem conservador, caso durationMs não venha
+      // fallback conservador caso durationMs não venha
       const approxSeconds = Math.round((audio.length * 3) / (4 * 32000));
       secondsThisCall = approxSeconds > 0 ? approxSeconds : 1;
     }
@@ -263,11 +334,9 @@ export default async function handler(req, res) {
     const transcript = await transcribeAudio(audio);
     const { correct_sentence, feedback_text } = await buildFeedback(transcript || "");
 
-// Frase que vai para o TTS (em inglês)
-const spokenText = `Correct sentence: ${correct_sentence}. Now repeat: ${correct_sentence}.`;
-
-const audioBase64 = await synthesizeSpeech(spokenText);
-
+    // >>> AQUI entra o novo comportamento do áudio
+    const spokenText = buildSpokenText(correct_sentence, feedback_text);
+    const audioBase64 = await synthesizeSpeech(spokenText);
 
     return res.status(200).json({
       transcript,
