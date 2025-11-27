@@ -291,27 +291,30 @@
     color: var(--text);
   }
 
-  /* NOVO: layout tipo “Você disse / Melhor maneira de dizer” */
-  .speak-compare {
-    margin-top: 6px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #020617;
-    border: 1px solid var(--border);
-  }
+/* bloco da comparação (remove o quadrado interno) */
+.speak-compare {
+  margin-top: 8px;        /* só um espacinho depois do áudio */
+  padding: 0;             /* sem “almofada” interna */
+  background: transparent;/* tira o fundo azul/roxo */
+  border: 0;              /* sem borda, sem card */
+  border-radius: 0;
+}
 
-  .speak-compare-title {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 0 0 2px 0;
-    color: var(--muted);
-  }
+/* títulos: "O que foi entendido", "Frase modelo" etc. */
+.speak-compare-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin: 6px 0 2px 0;    /* bem juntinho, como no print 2 */
+  color: var(--text);
+}
 
-  .speak-phrase {
-    font-size: 14px;
-    line-height: 1.4;
-    margin: 0;
-  }
+/* frase com as palavras grifadas */
+.speak-phrase {
+  display: block;
+  font-size: 14px;
+  line-height: 1.4;
+  margin: 0 0 4px 0;      /* espaço pequeno entre as frases */
+}
 
   .speak-bad-token {
     background: #fecaca;      /* vermelho claro forte */
