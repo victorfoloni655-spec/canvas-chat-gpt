@@ -291,6 +291,44 @@
     color: var(--text);
   }
 
+  /* NOVO: layout tipo “Você disse / Melhor maneira de dizer” */
+  .speak-compare {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #020617;
+    border: 1px solid var(--border);
+  }
+
+  .speak-compare-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+    color: var(--muted);
+  }
+
+  .speak-phrase {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .speak-bad-token {
+    background: #fecaca;      /* vermelho claro forte */
+    color: #450a0a;
+    border-radius: 4px;
+    padding: 1px 4px;
+    text-decoration: underline;
+    font-weight: 600;
+  }
+
+  .speak-good-token {
+    background: #bbf7d0;      /* verde claro forte */
+    color: #064e3b;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-weight: 600;
+  }
+
   /* Mobile */
   @media (max-width: 600px) {
     .wrap { padding: 8px; }
@@ -511,11 +549,75 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
+/* Helpers para HTML seguro e diff */
+function escapeHtml(str){
+  return String(str || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+function tokenizeSentence(str) {
+  return String(str || '')
+    .trim()
+    .split(/\s+/);
+}
+
+function buildHighlightedSentences(original, corrected) {
+  const origTokens = tokenizeSentence(original);
+  const corrTokens = tokenizeSentence(corrected);
+  const maxLen = Math.max(origTokens.length, corrTokens.length);
+
+  const origParts = [];
+  const corrParts = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const o = origTokens[i];
+    const c = corrTokens[i];
+
+    // inserção (só existe na frase modelo)
+    if (o === undefined && c !== undefined) {
+      corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+      continue;
+    }
+
+    // remoção (só existe no que o aluno disse)
+    if (c === undefined && o !== undefined) {
+      origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+      continue;
+    }
+
+    if (o === c) {
+      const safe = escapeHtml(o);
+      origParts.push(safe);
+      corrParts.push(safe);
+    } else {
+      if (o !== undefined) {
+        origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+      }
+      if (c !== undefined) {
+        corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+      }
+    }
+  }
+
+  return {
+    originalHtml: origParts.join(' '),
+    correctedHtml: corrParts.join(' ')
+  };
+}
+
 function renderAIAudioMessage(data){
   const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
   const t = transcript || "(não reconhecido)";
   const c = correct_sentence || "(sem frase modelo)";
   const f = feedback_text || "(sem feedback)";
+
+  // debug pra você ver no console
+  console.log('[SPEAKING] transcript:', t);
+  console.log('[SPEAKING] correct_sentence:', c);
 
   const el = document.createElement('div');
   el.className = 'msg bot speak-msg';
@@ -525,12 +627,20 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
+  const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
+
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
-    <div class="speak-meta">
-      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
-      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
+    <div class="speak-compare">
+      <div class="speak-compare-title">Você disse:</div>
+      <p class="speak-phrase">${originalHtml}</p>
+
+      <div class="speak-compare-title" style="margin-top:6px;">Melhor maneira de dizer:</div>
+      <p class="speak-phrase">${correctedHtml}</p>
+    </div>
+
+    <div class="speak-meta" style="margin-top:6px;">
       <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
@@ -836,15 +946,6 @@ function blobToBase64(blob){
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
-}
-
-function escapeHtml(str){
-  return String(str || "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
 }
 
 function showSpeakingResult(data){
