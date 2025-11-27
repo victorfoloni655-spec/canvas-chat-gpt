@@ -281,11 +281,13 @@
     margin-top: 4px;
   }
 
-  .speak-meta {
-    margin-top: 4px;
-    font-size: 13px;
-    color: var(--muted);
-  }
+  /* bloco de feedback embaixo */
+.speak-meta {
+  font-size: 13px;
+  line-height: 1.25;      /* ↓ linhas mais juntinhas no feedback */
+  margin-top: 2px;        /* ↓ menos espaço antes do feedback */
+  color: var(--muted);
+}
 
   .speak-meta strong {
     color: var(--text);
@@ -308,12 +310,12 @@
   color: var(--text);
 }
 
-/* frase com as palavras grifadas */
+/* frases com as palavras grifadas */
 .speak-phrase {
   display: block;
   font-size: 14px;
-  line-height: 1.4;
-  margin: 0 0 4px 0;      /* espaço pequeno entre as frases */
+  line-height: 1.25;      /* ↓ diminui a altura da linha */
+  margin: 0 0 2px 0;      /* ↓ menos espaço depois da frase */
 }
 
   .speak-bad-token {
