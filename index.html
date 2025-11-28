@@ -1,4 +1,4 @@
-<!doctype html>
+vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
 <html lang="pt-br">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
@@ -133,7 +133,7 @@
 
   .msg {
     max-width: 80%;
-    padding: 8px 10px; /* um pouco menos alto */
+    padding: 10px 12px;
     border: 1px solid var(--border);
     border-radius: 12px;
     white-space: pre-wrap;
@@ -272,74 +272,23 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-top: 2px;
+    gap: 10px;
+    margin-top: 4px;
   }
 
   .speak-msg audio {
     width: 100%;
     margin-top: 4px;
-    margin-bottom: 6px; /* aproxima o texto do áudio */
   }
 
-  /* bloco de feedback embaixo */
   .speak-meta {
+    margin-top: 4px;
     font-size: 13px;
-    line-height: 1.25;
-    margin-top: 4px;       /* menos espaço antes do feedback */
     color: var(--muted);
   }
 
   .speak-meta strong {
     color: var(--text);
-  }
-
-  /* bloco da comparação (sem quadrado interno) */
-  .speak-compare {
-    margin-top: 2px;       /* bem colado ao áudio */
-    padding: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-  }
-
-  /* linha com label + frase na MESMA linha */
-  .speak-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;             /* espacinho entre label e tokens */
-    align-items: baseline;
-    margin-top: 4px;      /* espaço mínimo entre as duas linhas */
-  }
-
-  .speak-compare-title {
-    font-weight: 600;
-    font-size: 13px;
-    margin: 0;
-    color: var(--text);
-  }
-
-  .speak-phrase {
-    font-size: 14px;
-    line-height: 1.25;    /* mais compacto */
-    margin: 0;
-  }
-
-  .speak-bad-token {
-    background: #fecaca;
-    color: #450a0a;
-    border-radius: 4px;
-    padding: 1px 4px;
-    text-decoration: underline;
-    font-weight: 600;
-  }
-
-  .speak-good-token {
-    background: #bbf7d0;
-    color: #064e3b;
-    border-radius: 4px;
-    padding: 1px 4px;
-    font-weight: 600;
   }
 
   /* Mobile */
@@ -540,6 +489,7 @@ function saveSpeakHistory(entry) {
       if (Array.isArray(parsed)) arr = parsed;
     }
     arr.push(entry);
+    // limita a ~20 interações (user+ia = 40 registros)
     if (arr.length > 40) {
       arr = arr.slice(arr.length - 40);
     }
@@ -561,72 +511,11 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Helpers para HTML seguro e diff */
-function escapeHtml(str){
-  return String(str || "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
-}
-
-function tokenizeSentence(str) {
-  return String(str || '')
-    .trim()
-    .split(/\s+/);
-}
-
-function buildHighlightedSentences(original, corrected) {
-  const origTokens = tokenizeSentence(original);
-  const corrTokens = tokenizeSentence(corrected);
-  const maxLen = Math.max(origTokens.length, corrTokens.length);
-
-  const origParts = [];
-  const corrParts = [];
-
-  for (let i = 0; i < maxLen; i++) {
-    const o = origTokens[i];
-    const c = corrTokens[i];
-
-    if (o === undefined && c !== undefined) {
-      corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
-      continue;
-    }
-
-    if (c === undefined && o !== undefined) {
-      origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
-      continue;
-    }
-
-    if (o === c) {
-      const safe = escapeHtml(o);
-      origParts.push(safe);
-      corrParts.push(safe);
-    } else {
-      if (o !== undefined) {
-        origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
-      }
-      if (c !== undefined) {
-        corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
-      }
-    }
-  }
-
-  return {
-    originalHtml: origParts.join(' '),
-    correctedHtml: corrParts.join(' ')
-  };
-}
-
 function renderAIAudioMessage(data){
   const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
   const t = transcript || "(não reconhecido)";
   const c = correct_sentence || "(sem frase modelo)";
   const f = feedback_text || "(sem feedback)";
-
-  console.log('[SPEAKING] transcript:', t);
-  console.log('[SPEAKING] correct_sentence:', c);
 
   const el = document.createElement('div');
   el.className = 'msg bot speak-msg';
@@ -636,24 +525,12 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
-  const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
-
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
-    <div class="speak-compare">
-      <div class="speak-row">
-        <span class="speak-compare-title">Você disse:</span>
-        <span class="speak-phrase">${originalHtml}</span>
-      </div>
-
-      <div class="speak-row">
-        <span class="speak-compare-title">Melhor maneira de dizer:</span>
-        <span class="speak-phrase">${correctedHtml}</span>
-      </div>
-    </div>
-
     <div class="speak-meta">
+      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
+      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
       <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
@@ -662,7 +539,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam */
+/* Versões que renderizam + salvam (para uso em tempo real) */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -881,7 +758,7 @@ async function startRecording(){
     isCancelling = false;
     recordStart = Date.now();
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-    recordBtn.textContent = "Enviar";
+    recordBtn.textContent = "Parar e enviar";
     recordBtn.classList.add('btn-recording');
     cancelRecordBtn.disabled = false;
 
@@ -961,6 +838,15 @@ function blobToBase64(blob){
   });
 }
 
+function escapeHtml(str){
+  return String(str || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
 function showSpeakingResult(data){
   appendAIAudioMessage(data);
 
@@ -1028,7 +914,7 @@ cancelRecordBtn.addEventListener('click', () => {
 
 /* ---------- INIT ---------- */
 captureTokenFromURL();
-setMode('chat');
+setMode('chat');       // garante que só o chat aparece na 1ª carga
 atualizarQuotaChat();
 loadLocalHistory();
 loadSpeakHistory();
