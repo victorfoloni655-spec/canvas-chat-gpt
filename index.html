@@ -202,7 +202,7 @@
     color: #fff;
   }
 
-  /* CTAs de upgrade (chat) */
+  /* CTAs de upgrade (chat + speaking) */
   .cta-wrap {
     display: flex;
     flex-wrap: wrap;
@@ -459,6 +459,34 @@ function addCTAPackages(packages){
   el.appendChild(wrap);
   chat.appendChild(el);
   chat.scrollTop = chat.scrollHeight;
+}
+
+/* ---------- CTA SPEAKING (tempo extra) ---------- */
+function addSpeakCTAPackages(packages){
+  const el = document.createElement('div');
+  el.className = 'msg bot';
+
+  const txt = document.createElement('div');
+  txt.textContent = 'Você atingiu o limite de prática de áudio. Deseja liberar mais minutos de speaking?';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cta-wrap';
+
+  (packages || []).forEach(p => {
+    if (!p?.url) return;
+    const a = document.createElement('a');
+    a.className = 'cta-btn';
+    a.href = p.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = p.label || 'Comprar';
+    wrap.appendChild(a);
+  });
+
+  el.appendChild(txt);
+  el.appendChild(wrap);
+  speakConversation.appendChild(el);
+  speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
 /* ---------- HISTÓRICO CHAT (localStorage) ---------- */
@@ -978,6 +1006,9 @@ async function sendSpeakingAudio(base64, durationMs){
       if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
         speakingQuota = { usedSeconds: j.usedSeconds, limitSeconds: j.limitSeconds };
         updateBadge();
+      }
+      if (Array.isArray(j.packages) && j.packages.length > 0) {
+        addSpeakCTAPackages(j.packages);
       }
       return;
     }
