@@ -272,8 +272,8 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-top: 2px;
+    gap: 10px;
+    margin-top: 4px;
   }
 
   .speak-msg audio {
@@ -281,57 +281,33 @@
     margin-top: 4px;
   }
 
-  /* bloco de feedback embaixo */
-.speak-meta {
-  font-size: 13px;
-  line-height: 1.25;      /* ↓ linhas mais juntinhas no feedback */
-  margin-top: 2px;        /* ↓ menos espaço antes do feedback */
-  color: var(--muted);
-}
+  .speak-meta {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--muted);
+  }
 
   .speak-meta strong {
     color: var(--text);
   }
 
-/* bloco da comparação (remove o quadrado interno) */
-.speak-compare {
-  margin-top: 8px;        /* só um espacinho depois do áudio */
-  padding: 0;             /* sem “almofada” interna */
-  background: transparent;/* tira o fundo azul/roxo */
-  border: 0;              /* sem borda, sem card */
-  border-radius: 0;
-}
-
-/* títulos: "O que foi entendido", "Frase modelo" etc. */
-.speak-compare-title {
-  font-weight: 600;
-  font-size: 14px;
-  margin: 6px 0 2px 0;    /* bem juntinho, como no print 2 */
-  color: var(--text);
-}
-
-/* frases com as palavras grifadas */
-.speak-phrase {
-  display: block;
-  font-size: 14px;
-  line-height: 1.25;      /* ↓ diminui a altura da linha */
-  margin: 0 0 2px 0;      /* ↓ menos espaço depois da frase */
-}
-
+  /* tokens certo/errado */
   .speak-bad-token {
-    background: #fecaca;      /* vermelho claro forte */
+    background: #fecaca;
     color: #450a0a;
     border-radius: 4px;
-    padding: 1px 4px;
+    padding: 0 4px;
+    line-height: 1.0;
     text-decoration: underline;
     font-weight: 600;
   }
 
   .speak-good-token {
-    background: #bbf7d0;      /* verde claro forte */
+    background: #bbf7d0;
     color: #064e3b;
     border-radius: 4px;
-    padding: 1px 4px;
+    padding: 0 4px;
+    line-height: 1.0;
     font-weight: 600;
   }
 
@@ -555,7 +531,7 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Helpers para HTML seguro e diff */
+/* ---------- helpers de HTML/diff ---------- */
 function escapeHtml(str){
   return String(str || "")
     .replace(/&/g,"&amp;")
@@ -563,6 +539,14 @@ function escapeHtml(str){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#039;");
+}
+
+// marcar manualmente se quiser
+function badToken(word) {
+  return `<span class="speak-bad-token">${escapeHtml(word)}</span>`;
+}
+function goodToken(word) {
+  return `<span class="speak-good-token">${escapeHtml(word)}</span>`;
 }
 
 function tokenizeSentence(str) {
@@ -583,15 +567,15 @@ function buildHighlightedSentences(original, corrected) {
     const o = origTokens[i];
     const c = corrTokens[i];
 
-    // inserção (só existe na frase modelo)
+    // inserção na frase modelo
     if (o === undefined && c !== undefined) {
-      corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+      corrParts.push(goodToken(c));
       continue;
     }
 
-    // remoção (só existe no que o aluno disse)
+    // remoção na frase do aluno
     if (c === undefined && o !== undefined) {
-      origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+      origParts.push(badToken(o));
       continue;
     }
 
@@ -601,10 +585,10 @@ function buildHighlightedSentences(original, corrected) {
       corrParts.push(safe);
     } else {
       if (o !== undefined) {
-        origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+        origParts.push(badToken(o));
       }
       if (c !== undefined) {
-        corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+        corrParts.push(goodToken(c));
       }
     }
   }
@@ -621,10 +605,6 @@ function renderAIAudioMessage(data){
   const c = correct_sentence || "(sem frase modelo)";
   const f = feedback_text || "(sem feedback)";
 
-  // debug pra você ver no console
-  console.log('[SPEAKING] transcript:', t);
-  console.log('[SPEAKING] correct_sentence:', c);
-
   const el = document.createElement('div');
   el.className = 'msg bot speak-msg';
 
@@ -638,15 +618,9 @@ function renderAIAudioMessage(data){
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
-    <div class="speak-compare">
-      <div class="speak-compare-title">Você disse:</div>
-      <p class="speak-phrase">${originalHtml}</p>
-
-      <div class="speak-compare-title" style="margin-top:6px;">Melhor maneira de dizer:</div>
-      <p class="speak-phrase">${correctedHtml}</p>
-    </div>
-
-    <div class="speak-meta" style="margin-top:6px;">
+    <div class="speak-meta">
+      <strong>Você disse:</strong> ${originalHtml}<br>
+      <strong>Melhor maneira de dizer:</strong> ${correctedHtml}<br>
       <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
@@ -874,7 +848,7 @@ async function startRecording(){
     isCancelling = false;
     recordStart = Date.now();
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-    recordBtn.textContent = "Enviar";
+    recordBtn.textContent = "Parar e enviar";
     recordBtn.classList.add('btn-recording');
     cancelRecordBtn.disabled = false;
 
