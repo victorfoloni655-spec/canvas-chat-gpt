@@ -19,6 +19,10 @@ const SPEAKING_LIMIT_SECONDS =
   Number(process.env.SPEAKING_MONTHLY_LIMIT_SECONDS) ||
   (Number(process.env.SPEAKING_MONTHLY_LIMIT_MINUTES || 20) * 60);
 
+// NOVO: URLs de checkout para minutos extras
+const CHECKOUT_URL_SPEAK_5  = process.env.CHECKOUT_URL_SPEAK_5 || null;
+const CHECKOUT_URL_SPEAK_10 = process.env.CHECKOUT_URL_SPEAK_10 || null;
+
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
 }
@@ -307,9 +311,26 @@ export default async function handler(req, res) {
     const current = Number((await redis.get(key)) || 0);
     const newTotal = current + secondsThisCall;
 
+    // 🔴 AQUI: limite mensal + pacotes de upgrade
     if (newTotal > SPEAKING_LIMIT_SECONDS) {
       const usedMinutes = current / 60;
       const limitMinutes = SPEAKING_LIMIT_SECONDS / 60;
+
+      // monta lista de pacotes só se as URLs estiverem configuradas
+      const packages = [];
+      if (CHECKOUT_URL_SPEAK_5) {
+        packages.push({
+          label: "+ 5 minutos de speaking",
+          url: CHECKOUT_URL_SPEAK_5,
+        });
+      }
+      if (CHECKOUT_URL_SPEAK_10) {
+        packages.push({
+          label: "+ 10 minutos de speaking",
+          url: CHECKOUT_URL_SPEAK_10,
+        });
+      }
+
       return res.status(429).json({
         error: "limit_reached",
         message: "Limite mensal de prática de áudio atingido.",
@@ -317,6 +338,7 @@ export default async function handler(req, res) {
         limitSeconds: SPEAKING_LIMIT_SECONDS,
         usedMinutes,
         limitMinutes,
+        packages, // NOVO: o front vai usar isso para mostrar os botões
       });
     }
 
