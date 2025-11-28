@@ -929,12 +929,13 @@ async function startRecording(){
 
     mediaRecorder.start();
 
-    recordTimerId = setInterval(() => {
-      const sec = Math.floor((Date.now() - recordStart) / 1000);
-      const m = String(Math.floor(sec / 60)).padStart(2,'0');
-      const s = String(sec % 60)).padStart(2,'0');
-      recordTimer.textContent = `${m}:${s}`;
-    }, 500);
+   recordTimerId = setInterval(() => {
+  const sec = Math.floor((Date.now() - recordStart) / 1000);
+  const m = String(Math.floor(sec / 60)).padStart(2,'0');
+  const s = String(sec % 60).padStart(2,'0');
+  recordTimer.textContent = `${m}:${s}`;
+}, 500);
+
   } catch (err) {
     console.error("Erro ao acessar microfone:", err);
     speakStatus.textContent = "Não foi possível acessar o microfone (permissão negada?).";
