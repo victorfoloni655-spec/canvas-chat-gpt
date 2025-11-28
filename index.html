@@ -117,7 +117,7 @@
   #speak-section {
     flex: 1 1 auto;
     min-height: 0;
-    display: flex;
+    display: flex;           /* o JS troca entre flex/none */
     flex-direction: column;
   }
 
@@ -133,7 +133,7 @@
 
   .msg {
     max-width: 80%;
-    padding: 8px 10px;
+    padding: 8px 10px; /* um pouco menos alto */
     border: 1px solid var(--border);
     border-radius: 12px;
     white-space: pre-wrap;
@@ -279,14 +279,14 @@
   .speak-msg audio {
     width: 100%;
     margin-top: 4px;
-    margin-bottom: 6px;
+    margin-bottom: 6px; /* aproxima o texto do áudio */
   }
 
   /* bloco de feedback embaixo */
   .speak-meta {
     font-size: 13px;
     line-height: 1.25;
-    margin-top: 4px;
+    margin-top: 4px;       /* menos espaço antes do feedback */
     color: var(--muted);
   }
 
@@ -296,20 +296,20 @@
 
   /* bloco da comparação (sem quadrado interno) */
   .speak-compare {
-    margin-top: 2px;
+    margin-top: 2px;       /* bem colado ao áudio */
     padding: 0;
     background: transparent;
     border: 0;
     border-radius: 0;
   }
 
-  /* linha com label + frase na mesma linha */
+  /* linha com label + frase na MESMA linha */
   .speak-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 4px;             /* espacinho entre label e tokens */
     align-items: baseline;
-    margin-top: 4px;
+    margin-top: 4px;      /* espaço mínimo entre as duas linhas */
   }
 
   .speak-compare-title {
@@ -321,13 +321,12 @@
 
   .speak-phrase {
     font-size: 14px;
-    line-height: 1.25;
+    line-height: 1.25;    /* mais compacto */
     margin: 0;
   }
 
-  /* CORES DA CORREÇÃO */
   .speak-bad-token {
-    background: #fecaca;      /* vermelho claro */
+    background: #fecaca;
     color: #450a0a;
     border-radius: 4px;
     padding: 1px 4px;
@@ -336,7 +335,7 @@
   }
 
   .speak-good-token {
-    background: #bbf7d0;      /* verde claro */
+    background: #bbf7d0;
     color: #064e3b;
     border-radius: 4px;
     padding: 1px 4px;
@@ -380,7 +379,7 @@
         <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <!-- TELA DE CHAT -->
+      <!-- TELA DE CHAT (apenas texto) -->
       <div id="chat-section">
         <div id="chat" class="chat"></div>
         <div class="chat-footer">
@@ -389,7 +388,7 @@
         </div>
       </div>
 
-      <!-- TELA DE PRONÚNCIA -->
+      <!-- TELA DE PRONÚNCIA (apenas voz) -->
       <div id="speak-section" style="display:none">
         <div class="speak-box">
           <p class="speak-helper">
@@ -578,7 +577,6 @@ function tokenizeSentence(str) {
     .split(/\s+/);
 }
 
-/* monta as frases com spans vermelhos / verdes */
 function buildHighlightedSentences(original, corrected) {
   const origTokens = tokenizeSentence(original);
   const corrTokens = tokenizeSentence(corrected);
@@ -591,13 +589,11 @@ function buildHighlightedSentences(original, corrected) {
     const o = origTokens[i];
     const c = corrTokens[i];
 
-    // inserção (apenas na frase correta)
     if (o === undefined && c !== undefined) {
       corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
       continue;
     }
 
-    // remoção (apenas na frase do aluno)
     if (c === undefined && o !== undefined) {
       origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
       continue;
@@ -623,7 +619,6 @@ function buildHighlightedSentences(original, corrected) {
   };
 }
 
-/* render da resposta da IA com realce colorido */
 function renderAIAudioMessage(data){
   const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
   const t = transcript || "(não reconhecido)";
@@ -929,13 +924,12 @@ async function startRecording(){
 
     mediaRecorder.start();
 
-   recordTimerId = setInterval(() => {
-  const sec = Math.floor((Date.now() - recordStart) / 1000);
-  const m = String(Math.floor(sec / 60)).padStart(2,'0');
-  const s = String(sec % 60).padStart(2,'0');
-  recordTimer.textContent = `${m}:${s}`;
-}, 500);
-
+    recordTimerId = setInterval(() => {
+      const sec = Math.floor((Date.now() - recordStart) / 1000);
+      const m = String(Math.floor(sec / 60)).padStart(2,'0');
+      const s = String(sec % 60).padStart(2,'0');
+      recordTimer.textContent = `${m}:${s}`;
+    }, 500);
   } catch (err) {
     console.error("Erro ao acessar microfone:", err);
     speakStatus.textContent = "Não foi possível acessar o microfone (permissão negada?).";
