@@ -278,8 +278,8 @@
 
   .speak-msg audio {
     width: 100%;
-    margin-top: 4px;
-    margin-bottom: 6px; /* aproxima o texto do áudio */
+    margin-top: 2px;
+    margin-bottom: 2px; /* aproxima o texto do áudio */
   }
 
   /* bloco de feedback embaixo */
@@ -296,7 +296,7 @@
 
   /* bloco da comparação (sem quadrado interno) */
   .speak-compare {
-    margin-top: 2px;       /* bem colado ao áudio */
+    margin-top: 0px;       /* bem colado ao áudio */
     padding: 0;
     background: transparent;
     border: 0;
@@ -309,19 +309,20 @@
     flex-wrap: wrap;
     gap: 4px;             /* espacinho entre label e tokens */
     align-items: baseline;
-    margin-top: 4px;      /* espaço mínimo entre as duas linhas */
+    margin-top: 2px;      /* espaço mínimo entre as duas linhas */
   }
 
   .speak-compare-title {
     font-weight: 600;
     font-size: 13px;
+    line-height: 1.1;
     margin: 0;
     color: var(--text);
   }
 
   .speak-phrase {
     font-size: 14px;
-    line-height: 1.25;    /* mais compacto */
+    line-height: 1.1;    /* mais compacto */
     margin: 0;
   }
 
