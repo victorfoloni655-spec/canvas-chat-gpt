@@ -541,6 +541,13 @@ function escapeHtml(str){
     .replace(/'/g,"&#039;");
 }
 
+function normalizeSentence(str) {
+  return String(str || '')
+    .toLowerCase()
+    .replace(/[.,!?;:"]/g, '')
+    .trim();
+}
+
 // marcar manualmente se quiser
 function badToken(word) {
   return `<span class="speak-bad-token">${escapeHtml(word)}</span>`;
@@ -613,15 +620,29 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
+  // gera HTML com cores onde há diferença
   const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
+
+  // true se, na prática, a frase do aluno e a modelo forem iguais
+  const sameSentence =
+    transcript && correct_sentence &&
+    normalizeSentence(transcript) === normalizeSentence(correct_sentence);
+
+  let metaInner = `
+    <strong>Você disse:</strong> ${originalHtml}<br>
+  `;
+
+  if (!sameSentence) {
+    metaInner += `<strong>Melhor maneira de dizer:</strong> ${correctedHtml}<br>`;
+  }
+
+  metaInner += `<strong>Feedback:</strong> ${escapeHtml(f)}`;
 
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
     <div class="speak-meta">
-      <strong>Você disse:</strong> ${originalHtml}<br>
-      <strong>Melhor maneira de dizer:</strong> ${correctedHtml}<br>
-      <strong>Feedback:</strong> ${escapeHtml(f)}
+      ${metaInner}
     </div>
   `;
 
