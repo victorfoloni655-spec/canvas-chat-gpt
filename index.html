@@ -1,4 +1,4 @@
-vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
+<!doctype html>
 <html lang="pt-br">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
@@ -117,7 +117,7 @@ vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
   #speak-section {
     flex: 1 1 auto;
     min-height: 0;
-    display: flex;           /* o JS troca entre flex/none */
+    display: flex;
     flex-direction: column;
   }
 
@@ -133,7 +133,7 @@ vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
 
   .msg {
     max-width: 80%;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--border);
     border-radius: 12px;
     white-space: pre-wrap;
@@ -272,23 +272,75 @@ vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 4px;
+    gap: 6px;
+    margin-top: 2px;
   }
 
   .speak-msg audio {
     width: 100%;
     margin-top: 4px;
+    margin-bottom: 6px;
   }
 
+  /* bloco de feedback embaixo */
   .speak-meta {
-    margin-top: 4px;
     font-size: 13px;
+    line-height: 1.25;
+    margin-top: 4px;
     color: var(--muted);
   }
 
   .speak-meta strong {
     color: var(--text);
+  }
+
+  /* bloco da comparação (sem quadrado interno) */
+  .speak-compare {
+    margin-top: 2px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* linha com label + frase na mesma linha */
+  .speak-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: baseline;
+    margin-top: 4px;
+  }
+
+  .speak-compare-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin: 0;
+    color: var(--text);
+  }
+
+  .speak-phrase {
+    font-size: 14px;
+    line-height: 1.25;
+    margin: 0;
+  }
+
+  /* CORES DA CORREÇÃO */
+  .speak-bad-token {
+    background: #fecaca;      /* vermelho claro */
+    color: #450a0a;
+    border-radius: 4px;
+    padding: 1px 4px;
+    text-decoration: underline;
+    font-weight: 600;
+  }
+
+  .speak-good-token {
+    background: #bbf7d0;      /* verde claro */
+    color: #064e3b;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-weight: 600;
   }
 
   /* Mobile */
@@ -328,7 +380,7 @@ vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
         <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <!-- TELA DE CHAT (apenas texto) -->
+      <!-- TELA DE CHAT -->
       <div id="chat-section">
         <div id="chat" class="chat"></div>
         <div class="chat-footer">
@@ -337,7 +389,7 @@ vou mandar meu codigo do index, ai voce pode atualizar para mim? <!doctype html>
         </div>
       </div>
 
-      <!-- TELA DE PRONÚNCIA (apenas voz) -->
+      <!-- TELA DE PRONÚNCIA -->
       <div id="speak-section" style="display:none">
         <div class="speak-box">
           <p class="speak-helper">
@@ -489,7 +541,6 @@ function saveSpeakHistory(entry) {
       if (Array.isArray(parsed)) arr = parsed;
     }
     arr.push(entry);
-    // limita a ~20 interações (user+ia = 40 registros)
     if (arr.length > 40) {
       arr = arr.slice(arr.length - 40);
     }
@@ -511,11 +562,76 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
+/* Helpers para HTML seguro e diff */
+function escapeHtml(str){
+  return String(str || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+function tokenizeSentence(str) {
+  return String(str || '')
+    .trim()
+    .split(/\s+/);
+}
+
+/* monta as frases com spans vermelhos / verdes */
+function buildHighlightedSentences(original, corrected) {
+  const origTokens = tokenizeSentence(original);
+  const corrTokens = tokenizeSentence(corrected);
+  const maxLen = Math.max(origTokens.length, corrTokens.length);
+
+  const origParts = [];
+  const corrParts = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const o = origTokens[i];
+    const c = corrTokens[i];
+
+    // inserção (apenas na frase correta)
+    if (o === undefined && c !== undefined) {
+      corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+      continue;
+    }
+
+    // remoção (apenas na frase do aluno)
+    if (c === undefined && o !== undefined) {
+      origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+      continue;
+    }
+
+    if (o === c) {
+      const safe = escapeHtml(o);
+      origParts.push(safe);
+      corrParts.push(safe);
+    } else {
+      if (o !== undefined) {
+        origParts.push(`<span class="speak-bad-token">${escapeHtml(o)}</span>`);
+      }
+      if (c !== undefined) {
+        corrParts.push(`<span class="speak-good-token">${escapeHtml(c)}</span>`);
+      }
+    }
+  }
+
+  return {
+    originalHtml: origParts.join(' '),
+    correctedHtml: corrParts.join(' ')
+  };
+}
+
+/* render da resposta da IA com realce colorido */
 function renderAIAudioMessage(data){
   const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
   const t = transcript || "(não reconhecido)";
   const c = correct_sentence || "(sem frase modelo)";
   const f = feedback_text || "(sem feedback)";
+
+  console.log('[SPEAKING] transcript:', t);
+  console.log('[SPEAKING] correct_sentence:', c);
 
   const el = document.createElement('div');
   el.className = 'msg bot speak-msg';
@@ -525,12 +641,24 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
+  const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
+
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
+    <div class="speak-compare">
+      <div class="speak-row">
+        <span class="speak-compare-title">Você disse:</span>
+        <span class="speak-phrase">${originalHtml}</span>
+      </div>
+
+      <div class="speak-row">
+        <span class="speak-compare-title">Melhor maneira de dizer:</span>
+        <span class="speak-phrase">${correctedHtml}</span>
+      </div>
+    </div>
+
     <div class="speak-meta">
-      <strong>O que foi entendido:</strong> ${escapeHtml(t)}<br>
-      <strong>Frase modelo:</strong> ${escapeHtml(c)}<br>
       <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
@@ -539,7 +667,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam (para uso em tempo real) */
+/* Versões que renderizam + salvam */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -758,7 +886,7 @@ async function startRecording(){
     isCancelling = false;
     recordStart = Date.now();
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-    recordBtn.textContent = "Parar e enviar";
+    recordBtn.textContent = "Enviar";
     recordBtn.classList.add('btn-recording');
     cancelRecordBtn.disabled = false;
 
@@ -804,7 +932,7 @@ async function startRecording(){
     recordTimerId = setInterval(() => {
       const sec = Math.floor((Date.now() - recordStart) / 1000);
       const m = String(Math.floor(sec / 60)).padStart(2,'0');
-      const s = String(sec % 60).padStart(2,'0');
+      const s = String(sec % 60)).padStart(2,'0');
       recordTimer.textContent = `${m}:${s}`;
     }, 500);
   } catch (err) {
@@ -836,15 +964,6 @@ function blobToBase64(blob){
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
-}
-
-function escapeHtml(str){
-  return String(str || "")
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
 }
 
 function showSpeakingResult(data){
@@ -914,7 +1033,7 @@ cancelRecordBtn.addEventListener('click', () => {
 
 /* ---------- INIT ---------- */
 captureTokenFromURL();
-setMode('chat');       // garante que só o chat aparece na 1ª carga
+setMode('chat');
 atualizarQuotaChat();
 loadLocalHistory();
 loadSpeakHistory();
