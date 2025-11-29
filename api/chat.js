@@ -34,7 +34,7 @@ function parseCookies(h = "") {
 function monthKey(userId) {
   const now = new Date();
   const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const m = String(now.getUTCMonth() + 1, 10).padStart(2, "0");
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
@@ -75,12 +75,14 @@ async function appendHistory(userId, userText, botText) {
     const now = Date.now();
 
     const entryUser = JSON.stringify({
+      kind: "chat",                   // <--- identifica que é histórico do CHAT
       role: "user",
       content: String(userText || ""),
       ts: now,
     });
 
     const entryBot = JSON.stringify({
+      kind: "chat",                   // <--- idem
       role: "assistant",
       content: String(botText || ""),
       ts: now,
@@ -88,7 +90,7 @@ async function appendHistory(userId, userText, botText) {
 
     // adiciona user e bot de uma vez
     await redis.rpush(key, entryUser, entryBot);
-    // mantém só os últimos N itens
+    // mantém só os últimos N itens (N = HISTORY_MAX)
     await redis.ltrim(key, -HISTORY_MAX, -1);
   } catch (e) {
     console.error("Erro ao salvar histórico:", e);
