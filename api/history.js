@@ -1,5 +1,5 @@
 // /api/history.js
-// Retorna o histórico simples do aluno (lista de mensagens user/assistant).
+// Retorna o histórico unificado do aluno (chat + speaking).
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -12,7 +12,11 @@ const redis = new Redis({
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 
 function parseCookies(h = "") {
-  return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
+  return Object.fromEntries(
+    (h || "")
+      .split(";")
+      .map((s) => s.trim().split("="))
+  );
 }
 
 async function getUserFromToken(t) {
@@ -29,11 +33,28 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
+// Garante que todo item tenha um "kind"
+// (os antigos, que só tinham role/content, viram kind:"chat")
+function normalizeItem(item) {
+  if (!item) return null;
+  if (!item.kind) {
+    return { ...item, kind: "chat" };
+  }
+  return item;
+}
+
 export default async function handler(req, res) {
   try {
     // Identidade: token 't' (mobile) ou cookie lti_user (desktop)
     const url = new URL(req.url, `https://${req.headers.host}`);
     const t = url.searchParams.get("t");
+    const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
+    const limitParam = url.searchParams.get("limit");
+
+    // limite máx de itens retornados
+    let limit = Number(limitParam) || 400;
+    if (limit < 10) limit = 10;
+    if (limit > 1000) limit = 1000;
 
     let user = null;
     if (t) {
@@ -52,10 +73,33 @@ export default async function handler(req, res) {
     }
 
     const key = historyKey(user);
-    const raw = await redis.lrange(key, 0, -1); // lista de strings JSON
-    const items = (raw || []).map(str => {
-      try { return JSON.parse(str); } catch { return null; }
-    }).filter(Boolean);
+
+    // pega só os últimos "limit" registros
+    const raw = await redis.lrange(key, -limit, -1); // lista de strings JSON
+
+    let items =
+      (raw || [])
+        .map((str) => {
+          try {
+            return JSON.parse(str);
+          } catch {
+            return null;
+          }
+        })
+        .map(normalizeItem)
+        .filter(Boolean) || [];
+
+    // filtro opcional por tipo
+    if (kindFilter === "chat" || kindFilter === "speaking") {
+      items = items.filter((it) => it.kind === kindFilter);
+    }
+
+    // ordena por timestamp crescente (se tiver ts)
+    items.sort((a, b) => {
+      const ta = typeof a.ts === "number" ? a.ts : 0;
+      const tb = typeof b.ts === "number" ? b.ts : 0;
+      return ta - tb;
+    });
 
     return res.status(200).json({ items });
   } catch (e) {
