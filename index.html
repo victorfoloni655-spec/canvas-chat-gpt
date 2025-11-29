@@ -1045,12 +1045,67 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
+  // ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
+async function loadRemoteHistory() {
+  try {
+    const t = getToken();
+    const url = t
+      ? `/api/history?t=${encodeURIComponent(t)}`
+      : '/api/history';
+
+    const res = await fetch(url, { credentials: 'include' });
+
+    if (!res.ok) {
+      console.error('Erro ao carregar histórico remoto:', res.status);
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    // garante em ordem cronológica
+    items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+    items.forEach(item => {
+      if (!item) return;
+
+      // 1) SPEAKING (kind === "speaking")
+      if (item.kind === 'speaking') {
+        if (item.role === 'user' && item.audioBase64) {
+          // áudio que o aluno enviou
+          renderStudentAudioMessage(item.audioBase64);
+        } else if (item.role === 'assistant') {
+          // resposta da IA com TTS + feedback
+          renderAIAudioMessage({
+            transcript: item.transcript || '',
+            correct_sentence: item.correct_sentence || '',
+            feedback_text: item.feedback_text || '',
+            audioBase64: item.audioBase64 || null
+          });
+        }
+        return; // não cai no chat
+      }
+
+      // 2) CHAT (inclui históricos antigos sem 'kind')
+      if (typeof item.content !== 'string') return;
+
+      const who = item.role === 'user' ? 'user' : 'bot';
+      addMsg(item.content, who);
+
+      // alimenta o array messages pra manter o contexto da conversa
+      const role = who === 'user' ? 'user' : 'assistant';
+      messages.push({ role, content: item.content });
+    });
+  } catch (err) {
+    console.error('Erro ao buscar histórico remoto:', err);
+  }
+}
+
 /* ---------- INIT ---------- */
 captureTokenFromURL();
 setMode('chat');       // garante que só o chat aparece na 1ª carga
 atualizarQuotaChat();
-loadLocalHistory();
-loadSpeakHistory();
+loadRemoteHistory();   // agora busca do Redis (multi-dispositivo)
 </script>
 </body>
 </html>
