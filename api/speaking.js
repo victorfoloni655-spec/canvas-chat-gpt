@@ -23,6 +23,12 @@ const SPEAKING_LIMIT_SECONDS =
 const CHECKOUT_URL_SPEAK_5  = process.env.CHECKOUT_URL_SPEAK_5 || null;
 const CHECKOUT_URL_SPEAK_10 = process.env.CHECKOUT_URL_SPEAK_10 || null;
 
+// NOVO: histórico integrado
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+// pode usar o mesmo HISTORY_MAX do chat (40) ou outro.
+// aqui deixei 80 pra caber mais práticas de áudio se quiser.
+const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 80);
+
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
 }
@@ -32,6 +38,10 @@ function monthKey(userId) {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${SPEAKING_PREFIX}:${y}-${m}:${userId}`;
+}
+
+function historyKey(userId) {
+  return `${HISTORY_PREFIX}:${userId}`;
 }
 
 async function getUserIdFromToken(t) {
@@ -265,6 +275,44 @@ function buildSpokenText(correct_sentence, feedback_text) {
   return `Check this: ${sent}. ${ptPart}`;
 }
 
+// --------- HISTÓRICO SPEAKING (integra com /api/history.js) ---------
+
+async function appendSpeakingHistory(userId, {
+  userAudioBase64,
+  transcript,
+  correct_sentence,
+  feedback_text,
+  ttsAudioBase64,
+}) {
+  try {
+    const key = historyKey(userId);
+    const now = Date.now();
+
+    const entryUser = JSON.stringify({
+      kind: "speaking",
+      role: "user",
+      audioBase64: userAudioBase64 || null,  // áudio que o aluno gravou
+      transcript: transcript || null,        // transcrição do que ele falou
+      ts: now,
+    });
+
+    const entryBot = JSON.stringify({
+      kind: "speaking",
+      role: "assistant",
+      transcript: transcript || null,        // o que o sistema entendeu
+      correct_sentence: correct_sentence || null,
+      feedback_text: feedback_text || null,
+      audioBase64: ttsAudioBase64 || null,   // áudio gerado pela IA (TTS)
+      ts: now,
+    });
+
+    await redis.rpush(key, entryUser, entryBot);
+    await redis.ltrim(key, -HISTORY_MAX, -1);
+  } catch (e) {
+    console.error("Erro ao salvar histórico speaking:", e);
+  }
+}
+
 // --------- handler principal ---------
 
 export default async function handler(req, res) {
@@ -311,12 +359,11 @@ export default async function handler(req, res) {
     const current = Number((await redis.get(key)) || 0);
     const newTotal = current + secondsThisCall;
 
-    // 🔴 AQUI: limite mensal + pacotes de upgrade
+    // limite mensal + pacotes de upgrade
     if (newTotal > SPEAKING_LIMIT_SECONDS) {
-      const usedMinutes = current / 60;
+      const usedMinutes  = current / 60;
       const limitMinutes = SPEAKING_LIMIT_SECONDS / 60;
 
-      // monta lista de pacotes só se as URLs estiverem configuradas
       const packages = [];
       if (CHECKOUT_URL_SPEAK_5) {
         packages.push({
@@ -338,7 +385,7 @@ export default async function handler(req, res) {
         limitSeconds: SPEAKING_LIMIT_SECONDS,
         usedMinutes,
         limitMinutes,
-        packages, // NOVO: o front vai usar isso para mostrar os botões
+        packages,
       });
     }
 
@@ -364,6 +411,15 @@ export default async function handler(req, res) {
     // texto final que vira áudio: "Check this: ... Dica rápida: ..."
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
+
+    // 🔵 NOVO: salva histórico integrado (speaking) no Redis
+    await appendSpeakingHistory(userId, {
+      userAudioBase64: audio,
+      transcript,
+      correct_sentence,
+      feedback_text,
+      ttsAudioBase64: audioBase64,
+    });
 
     return res.status(200).json({
       transcript,
