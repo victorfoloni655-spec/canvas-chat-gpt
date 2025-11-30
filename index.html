@@ -379,10 +379,8 @@
   </div>
 
 <script>
-const CHAT_URL    = '/api/chat';
-const QUOTA_URL   = '/api/quota';
-const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
-const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
+const CHAT_URL  = '/api/chat';
+const QUOTA_URL = '/api/quota';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -489,65 +487,7 @@ function addSpeakCTAPackages(packages){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* ---------- HISTÓRICO CHAT (localStorage) ---------- */
-function saveLocalHistory(role, content) {
-  try {
-    const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-    let arr = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) arr = parsed;
-    }
-    arr.push({ role, content, ts: Date.now() });
-    if (arr.length > 200) {
-      arr = arr.slice(arr.length - 200);
-    }
-    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(arr));
-  } catch (e) {
-    console.error('Erro ao salvar histórico local:', e);
-  }
-}
-
-function loadLocalHistory() {
-  try {
-    const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return;
-
-    arr.forEach(m => {
-      if (!m || typeof m.content !== 'string') return;
-      const who = m.role === 'user' ? 'user' : 'bot';
-      addMsg(m.content, who);
-      const role = who === 'user' ? 'user' : 'assistant';
-      messages.push({ role, content: m.content });
-    });
-  } catch (e) {
-    console.error('Erro ao carregar histórico local:', e);
-  }
-}
-
-/* ---------- HISTÓRICO SPEAKING (localStorage) ---------- */
-function saveSpeakHistory(entry) {
-  try {
-    const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
-    let arr = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) arr = parsed;
-    }
-    arr.push(entry);
-    // limita a ~20 interações (user+ia = 40 registros)
-    if (arr.length > 40) {
-      arr = arr.slice(arr.length - 40);
-    }
-    localStorage.setItem(LOCAL_SPEAK_HISTORY_KEY, JSON.stringify(arr));
-  } catch (e) {
-    console.error('Erro ao salvar histórico speaking:', e);
-  }
-}
-
-/* Renderização pura (sem salvar) */
+/* ---------- Renderização SPEAKING ---------- */
 function renderStudentAudioMessage(base64){
   const el = document.createElement('div');
   el.className = 'msg user speak-msg';
@@ -559,7 +499,7 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* ---------- helpers de HTML/diff ---------- */
+/* helpers de HTML/diff */
 function escapeHtml(str){
   return String(str || "")
     .replace(/&/g,"&amp;")
@@ -576,7 +516,6 @@ function normalizeSentence(str) {
     .trim();
 }
 
-// marcar manualmente se quiser
 function badToken(word) {
   return `<span class="speak-bad-token">${escapeHtml(word)}</span>`;
 }
@@ -648,10 +587,8 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
-  // gera HTML com cores onde há diferença
   const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
 
-  // true se, na prática, a frase do aluno e a modelo forem iguais
   const sameSentence =
     transcript && correct_sentence &&
     normalizeSentence(transcript) === normalizeSentence(correct_sentence);
@@ -678,52 +615,13 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam (para uso em tempo real) */
+/* Versões runtime: só renderizam (histórico remoto cuida da persistência) */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
-  saveSpeakHistory({
-    role: 'user',
-    audioBase64: base64,
-    ts: Date.now()
-  });
 }
 
 function appendAIAudioMessage(data){
   renderAIAudioMessage(data);
-  const { transcript, correct_sentence, feedback_text, audioBase64 } = data || {};
-  saveSpeakHistory({
-    role: 'assistant',
-    transcript: transcript || null,
-    correct_sentence: correct_sentence || null,
-    feedback_text: feedback_text || null,
-    audioBase64: audioBase64 || null,
-    ts: Date.now()
-  });
-}
-
-function loadSpeakHistory() {
-  try {
-    const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return;
-
-    arr.forEach(item => {
-      if (!item || !item.role) return;
-      if (item.role === 'user' && item.audioBase64) {
-        renderStudentAudioMessage(item.audioBase64);
-      } else if (item.role === 'assistant') {
-        renderAIAudioMessage({
-          transcript: item.transcript,
-          correct_sentence: item.correct_sentence,
-          feedback_text: item.feedback_text,
-          audioBase64: item.audioBase64
-        });
-      }
-    });
-  } catch (e) {
-    console.error('Erro ao carregar histórico speaking:', e);
-  }
 }
 
 /* ---------- QUOTA CHAT ---------- */
@@ -792,7 +690,6 @@ async function send(){
   const text = input.value.trim();
   if(!text) return;
   addMsg(text, 'user');
-  saveLocalHistory('user', text);
   input.value = '';
   btn.disabled = true;
 
@@ -830,7 +727,6 @@ async function send(){
     const data = await res.json();
     const reply = data.reply || "(sem conteúdo)";
     addMsg(reply, 'bot');
-    saveLocalHistory('assistant', reply);
     messages.push({ role: "assistant", content: reply });
 
     btn.disabled = false;
@@ -1045,7 +941,7 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
-  // ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
+/* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
 async function loadRemoteHistory() {
   try {
     const t = getToken();
@@ -1069,13 +965,11 @@ async function loadRemoteHistory() {
     items.forEach(item => {
       if (!item) return;
 
-      // 1) SPEAKING (kind === "speaking")
+      // SPEAKING
       if (item.kind === 'speaking') {
         if (item.role === 'user' && item.audioBase64) {
-          // áudio que o aluno enviou
           renderStudentAudioMessage(item.audioBase64);
         } else if (item.role === 'assistant') {
-          // resposta da IA com TTS + feedback
           renderAIAudioMessage({
             transcript: item.transcript || '',
             correct_sentence: item.correct_sentence || '',
@@ -1083,16 +977,15 @@ async function loadRemoteHistory() {
             audioBase64: item.audioBase64 || null
           });
         }
-        return; // não cai no chat
+        return;
       }
 
-      // 2) CHAT (inclui históricos antigos sem 'kind')
+      // CHAT (inclui históricos antigos sem 'kind')
       if (typeof item.content !== 'string') return;
 
       const who = item.role === 'user' ? 'user' : 'bot';
       addMsg(item.content, who);
 
-      // alimenta o array messages pra manter o contexto da conversa
       const role = who === 'user' ? 'user' : 'assistant';
       messages.push({ role, content: item.content });
     });
@@ -1103,9 +996,18 @@ async function loadRemoteHistory() {
 
 /* ---------- INIT ---------- */
 captureTokenFromURL();
-setMode('chat');       // garante que só o chat aparece na 1ª carga
+
+// limpa histórico antigo do localStorage (versão antiga)
+try {
+  localStorage.removeItem('ia_english_history_v1');
+  localStorage.removeItem('ia_english_speaking_v1');
+} catch (e) {
+  console.warn('Não foi possível limpar localStorage antigo:', e);
+}
+
+setMode('chat');
 atualizarQuotaChat();
-loadRemoteHistory();   // agora busca do Redis (multi-dispositivo)
+loadRemoteHistory();
 </script>
 </body>
 </html>
