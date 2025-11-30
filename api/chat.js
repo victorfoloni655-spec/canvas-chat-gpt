@@ -34,7 +34,7 @@ function parseCookies(h = "") {
 function monthKey(userId) {
   const now = new Date();
   const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1, 10).padStart(2, "0");
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
