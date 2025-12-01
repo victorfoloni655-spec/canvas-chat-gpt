@@ -1,12 +1,12 @@
 // /api/chat.js
 // Chat + limitador mensal + histórico simples no Redis.
-// Identidade: token 't' (JWT) OU cookie lti_user.
+// Identidade: uid (body) OU token 't' (JWT) OU cookie lti_user.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
 
 // ====== CONFIG ======
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // obrigatório
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const MONTHLY_LIMIT  = Number(process.env.MONTHLY_LIMIT || 400);
@@ -19,7 +19,7 @@ const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
 
 // Histórico
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
-const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40); // 20 turnos (user+bot)
+const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40);
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -28,7 +28,7 @@ const redis = new Redis({
 
 // ====== UTILS ======
 function parseCookies(h = "") {
-  return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
+  return Object.fromEntries((h || "").split(";").map((s) => s.trim().split("=")));
 }
 
 function monthKey(userId) {
@@ -38,7 +38,6 @@ function monthKey(userId) {
   return `${QUOTA_PREFIX}:${y}-${m}:${userId}`;
 }
 
-// incrementa e expira no 1º dia do próximo mês (UTC)
 async function incrMonthlyAndCheck(key, limit) {
   const used = await redis.incr(key);
   if (used === 1) {
@@ -57,25 +56,55 @@ async function getUserIdFromToken(t) {
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
     const { payload } = await jwtVerify(t, secret);
-    return payload?.sub || null; // sub = userId
+    return payload?.sub || null;
   } catch {
     return null;
   }
 }
 
-// ====== HISTÓRICO ======
 function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// salva um turno simples: última pergunta do aluno + resposta da IA
+// resolve identidade de forma consistente com /api/history
+async function resolveUserId(req, body) {
+  const url = new URL(req.url, `https://${req.headers.host}`);
+  const uidParam = url.searchParams.get("uid");
+  const tQuery   = url.searchParams.get("t");
+
+  const uidBody = body?.uid;
+  const tBody   = body?.t;
+
+  // 1) uid vindo do body (frontend manda em todas as chamadas)
+  if (uidBody) return uidBody;
+
+  // 2) uid via query (se algum dia usar)
+  if (uidParam) return uidParam;
+
+  // 3) token t
+  const token = tBody || tQuery;
+  if (token) {
+    const fromT = await getUserIdFromToken(token);
+    if (fromT) return fromT;
+  }
+
+  // 4) cookie LTI
+  const cookies = parseCookies(req.headers.cookie || "");
+  if (cookies["lti_user"]) {
+    return cookies["lti_user"];
+  }
+
+  return null;
+}
+
+// ====== HISTÓRICO ======
 async function appendHistory(userId, userText, botText) {
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
     const entryUser = JSON.stringify({
-      kind: "chat",                   // identifica que é histórico do CHAT
+      kind: "chat",
       role: "user",
       content: String(userText || ""),
       ts: now,
@@ -116,7 +145,6 @@ async function callOpenAI(messages) {
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
-// leitor simples de JSON
 async function readJson(req) {
   const raw = await new Promise((resolve) => {
     let d = "";
@@ -134,30 +162,17 @@ export default async function handler(req, res) {
     }
 
     const body = await readJson(req);
-    const { messages, t } = body || {};
+    const { messages } = body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
-    // 🧠 NOVO: mesma lógica de /api/history → 1º token 't', depois cookie
-    let userId = null;
-
-    // 1) token t (JWT)
-    if (t) {
-      const fromT = await getUserIdFromToken(t);
-      if (fromT) userId = fromT;
-    }
-
-    // 2) se não tiver token válido, tenta cookie lti_user
-    if (!userId) {
-      const cookies = parseCookies(req.headers.cookie || "");
-      userId = cookies["lti_user"] || null;
-    }
+    const userId = await resolveUserId(req, body);
 
     if (!userId) {
       return res.status(401).json({
         error: "no_user",
-        detail: "Abra pelo Canvas (LTI) ou envie um token para identificar o aluno.",
+        detail: "Não foi possível identificar o aluno (uid / token / cookie ausentes).",
       });
     }
 
@@ -183,16 +198,16 @@ export default async function handler(req, res) {
     const lastUserMsg = messages
       .slice()
       .reverse()
-      .find(m => m.role === "user");
+      .find((m) => m.role === "user");
     const userTextForHistory = lastUserMsg?.content || "";
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
-    // Salva histórico (não bloqueia a resposta se der erro)
+    // Salva histórico
     await appendHistory(userId, userTextForHistory, reply);
 
-    // DEBUG: quantos itens tem para esse userId na lista de histórico?
+    // Debug: quantos itens existem nessa lista?
     let historyDebugCount = 0;
     try {
       const debugRaw = await redis.lrange(historyKey(userId), 0, -1);
@@ -205,8 +220,8 @@ export default async function handler(req, res) {
       reply,
       used,
       limit: MONTHLY_LIMIT,
-      userId,             // 👈 agora você vê qual userId foi usado
-      historyDebugCount,  // 👈 e quantos itens existem pra ele
+      userId,
+      historyDebugCount,
     });
   } catch (e) {
     console.error("CHAT error:", e);
