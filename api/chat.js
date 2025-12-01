@@ -1,6 +1,6 @@
 // /api/chat.js
 // Chat + limitador mensal + histórico simples no Redis.
-// Identidade: cookie lti_user (desktop) OU token 't' (JWT) no body.
+// Identidade: token 't' (JWT) OU cookie lti_user.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -28,11 +28,7 @@ const redis = new Redis({
 
 // ====== UTILS ======
 function parseCookies(h = "") {
-  return Object.fromEntries(
-    (h || "")
-      .split(";")
-      .map((s) => s.trim().split("="))
-  );
+  return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
 }
 
 function monthKey(userId) {
@@ -79,7 +75,7 @@ async function appendHistory(userId, userText, botText) {
     const now = Date.now();
 
     const entryUser = JSON.stringify({
-      kind: "chat",
+      kind: "chat",                   // identifica que é histórico do CHAT
       role: "user",
       content: String(userText || ""),
       ts: now,
@@ -143,25 +139,31 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
-    // Identidade do aluno: cookie LTI -> token 't'
-    const cookies = parseCookies(req.headers.cookie || "");
-    let counterId = cookies["lti_user"] || null;
+    // 🧠 NOVO: mesma lógica de /api/history → 1º token 't', depois cookie
+    let userId = null;
 
-    if (!counterId && t) {
+    // 1) token t (JWT)
+    if (t) {
       const fromT = await getUserIdFromToken(t);
-      if (fromT) counterId = fromT;
+      if (fromT) userId = fromT;
     }
 
-    if (!counterId) {
+    // 2) se não tiver token válido, tenta cookie lti_user
+    if (!userId) {
+      const cookies = parseCookies(req.headers.cookie || "");
+      userId = cookies["lti_user"] || null;
+    }
+
+    if (!userId) {
       return res.status(401).json({
         error: "no_user",
-        detail: "Abra pelo Canvas (LTI) para identificar o aluno.",
+        detail: "Abra pelo Canvas (LTI) ou envie um token para identificar o aluno.",
       });
     }
 
     // Limite mensal
-    const key = monthKey(counterId);
-    const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
+    const quotaKey = monthKey(userId);
+    const { used, blocked } = await incrMonthlyAndCheck(quotaKey, MONTHLY_LIMIT);
     if (blocked) {
       const packages = [];
       if (CHECKOUT_URL_50)  packages.push({ label: "+50 mensagens",  url: CHECKOUT_URL_50,  amount: 50  });
@@ -181,32 +183,30 @@ export default async function handler(req, res) {
     const lastUserMsg = messages
       .slice()
       .reverse()
-      .find((m) => m.role === "user");
+      .find(m => m.role === "user");
     const userTextForHistory = lastUserMsg?.content || "";
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
     // Salva histórico (não bloqueia a resposta se der erro)
-    await appendHistory(counterId, userTextForHistory, reply);
+    await appendHistory(userId, userTextForHistory, reply);
 
-    // DEBUG opcional: quantos itens tem no histórico
+    // DEBUG: quantos itens tem para esse userId na lista de histórico?
     let historyDebugCount = 0;
     try {
-      const histKey = historyKey(counterId);
-      const all = await redis.lrange(histKey, 0, -1);
-      historyDebugCount = Array.isArray(all) ? all.length : 0;
-      console.log("CHAT history debug:", { histKey, historyDebugCount });
+      const debugRaw = await redis.lrange(historyKey(userId), 0, -1);
+      historyDebugCount = debugRaw.length;
     } catch (e) {
-      console.error("Erro debug history:", e);
+      console.error("Erro ao ler histórico para debug:", e);
     }
 
     return res.status(200).json({
       reply,
       used,
       limit: MONTHLY_LIMIT,
-      historyDebugCount,
-      userId: counterId, // <- ESSENCIAL: manda o id que estamos usando
+      userId,             // 👈 agora você vê qual userId foi usado
+      historyDebugCount,  // 👈 e quantos itens existem pra ele
     });
   } catch (e) {
     console.error("CHAT error:", e);
