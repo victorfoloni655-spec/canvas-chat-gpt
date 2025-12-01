@@ -17,11 +17,10 @@ const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
 
-// Histórico (compartilhado com /api/history.js)
+// Histórico
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40); // 20 turnos (user+bot)
 
-// Redis (Upstash)
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -75,14 +74,12 @@ function historyKey(userId) {
 
 // salva um turno simples: última pergunta do aluno + resposta da IA
 async function appendHistory(userId, userText, botText) {
-  if (!userId) return;
-
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
     const entryUser = JSON.stringify({
-      kind: "chat",                   // identifica que é histórico do CHAT
+      kind: "chat",
       role: "user",
       content: String(userText || ""),
       ts: now,
@@ -95,39 +92,30 @@ async function appendHistory(userId, userText, botText) {
       ts: now,
     });
 
-    // adiciona user e bot de uma vez
     await redis.rpush(key, entryUser, entryBot);
-    // mantém só os últimos N itens (N = HISTORY_MAX)
     await redis.ltrim(key, -HISTORY_MAX, -1);
   } catch (e) {
-    console.error("HISTORY_APPEND_ERROR", e);
+    console.error("Erro ao salvar histórico:", e);
   }
 }
 
 // ====== OPENAI ======
 async function callOpenAI(messages) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY não configurada");
-  }
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.7,
-    }),
+    body: JSON.stringify({ model: OPENAI_MODEL, messages, temperature: 0.7 }),
   });
 
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
     throw new Error(`OpenAI erro ${resp.status}: ${txt}`);
   }
-
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content ?? "";
 }
@@ -139,13 +127,7 @@ async function readJson(req) {
     req.on("data", (c) => (d += c));
     req.on("end", () => resolve(d));
   });
-
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
 // ====== HANDLER ======
@@ -157,23 +139,20 @@ export default async function handler(req, res) {
 
     const body = await readJson(req);
     const { messages, t } = body || {};
-
     if (!Array.isArray(messages) || messages.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "messages must be a non-empty array" });
+      return res.status(400).json({ error: "messages must be a non-empty array" });
     }
 
     // Identidade do aluno: cookie LTI -> token 't'
     const cookies = parseCookies(req.headers.cookie || "");
-    let userId = cookies["lti_user"] || null;
+    let counterId = cookies["lti_user"] || null;
 
-    if (!userId && t) {
+    if (!counterId && t) {
       const fromT = await getUserIdFromToken(t);
-      if (fromT) userId = fromT;
+      if (fromT) counterId = fromT;
     }
 
-    if (!userId) {
+    if (!counterId) {
       return res.status(401).json({
         error: "no_user",
         detail: "Abra pelo Canvas (LTI) para identificar o aluno.",
@@ -181,29 +160,13 @@ export default async function handler(req, res) {
     }
 
     // Limite mensal
-    const key = monthKey(userId);
+    const key = monthKey(counterId);
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
-
     if (blocked) {
       const packages = [];
-      if (CHECKOUT_URL_50)
-        packages.push({
-          label: "+50 mensagens",
-          url: CHECKOUT_URL_50,
-          amount: 50,
-        });
-      if (CHECKOUT_URL_100)
-        packages.push({
-          label: "+100 mensagens",
-          url: CHECKOUT_URL_100,
-          amount: 100,
-        });
-      if (CHECKOUT_URL_200)
-        packages.push({
-          label: "+200 mensagens",
-          url: CHECKOUT_URL_200,
-          amount: 200,
-        });
+      if (CHECKOUT_URL_50)  packages.push({ label: "+50 mensagens",  url: CHECKOUT_URL_50,  amount: 50  });
+      if (CHECKOUT_URL_100) packages.push({ label: "+100 mensagens", url: CHECKOUT_URL_100, amount: 100 });
+      if (CHECKOUT_URL_200) packages.push({ label: "+200 mensagens", url: CHECKOUT_URL_200, amount: 200 });
 
       return res.status(429).json({
         error: "limit_reached",
@@ -225,15 +188,28 @@ export default async function handler(req, res) {
     const reply = await callOpenAI(messages);
 
     // Salva histórico (não bloqueia a resposta se der erro)
-    await appendHistory(userId, userTextForHistory, reply);
+    await appendHistory(counterId, userTextForHistory, reply);
 
-    return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
+    // 🔎 DEBUG: lê quantos itens existem no histórico desse usuário
+    let historyDebugCount = 0;
+    try {
+      const histKey = historyKey(counterId);
+      const all = await redis.lrange(histKey, 0, -1);
+      historyDebugCount = Array.isArray(all) ? all.length : 0;
+      console.log("CHAT history debug:", { histKey, historyDebugCount });
+    } catch (e) {
+      console.error("Erro debug history:", e);
+    }
+
+    return res.status(200).json({
+      reply,
+      used,
+      limit: MONTHLY_LIMIT,
+      historyDebugCount, // campo extra só pra debug
+    });
   } catch (e) {
     console.error("CHAT error:", e);
-    return res.status(500).json({
-      error: "internal_error",
-      message: e?.message || "Erro interno no chat.",
-    });
+    return res.status(500).json({ error: e?.message || "internal error" });
   }
 }
 
