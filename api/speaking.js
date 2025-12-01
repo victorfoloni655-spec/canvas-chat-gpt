@@ -24,7 +24,7 @@ const CHECKOUT_URL_SPEAK_5  = process.env.CHECKOUT_URL_SPEAK_5 || null;
 const CHECKOUT_URL_SPEAK_10 = process.env.CHECKOUT_URL_SPEAK_10 || null;
 
 // Histórico integrado (mesma chave do chat)
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history2";
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 80);
 
 function parseCookies(h = "") {
