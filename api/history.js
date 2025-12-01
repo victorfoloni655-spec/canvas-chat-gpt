@@ -33,11 +33,34 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// Garante que itens antigos (sem "kind") sejam tratados como chat
+// Normaliza itens antigos (sem "kind") como chat
 function normalizeItem(item) {
   if (!item) return null;
   if (!item.kind) return { ...item, kind: "chat" };
   return item;
+}
+
+// Aceita tanto string (JSON) quanto objeto já desserializado
+function coerceItem(val) {
+  if (!val) return null;
+
+  // Caso upstash já devolva objeto
+  if (typeof val === "object") {
+    return normalizeItem(val);
+  }
+
+  // Caso seja string JSON
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      return normalizeItem(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  // Outros tipos ignoramos
+  return null;
 }
 
 // Resolve identidade de forma consistente com /api/chat e /api/speaking
@@ -46,7 +69,7 @@ async function resolveUserId(req) {
   const uidParam = url.searchParams.get("uid");
   const tQuery   = url.searchParams.get("t");
 
-  // 1) uid da URL (?uid=xxx) – o front sempre manda
+  // 1) uid da URL (o front sempre manda ?uid=xxx)
   if (uidParam) return uidParam;
 
   // 2) token t (se existir)
@@ -65,7 +88,7 @@ async function resolveUserId(req) {
 export default async function handler(req, res) {
   try {
     const url = new URL(req.url, `https://${req.headers.host}`);
-    const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
+    const kindFilter = url.searchParams.get("kind"); // "chat" ou "speaking" (opcional)
 
     const user = await resolveUserId(req);
 
@@ -78,21 +101,16 @@ export default async function handler(req, res) {
 
     const key = historyKey(user);
 
-    // ⚠️ IMPORTANTE: pega TUDO (0, -1)
-    // O tamanho já está limitado pelo LTRIM em /api/chat e /api/speaking
-    const raw = await redis.lrange(key, 0, -1); // lista de strings JSON
+    // Pega tudo (o tamanho já é limitado pelo LTRIM em /api/chat e /api/speaking)
+    const raw = await redis.lrange(key, 0, -1);
+
+    // Só pra debug: ver tipos que estão vindo
+    const rawTypes = Array.isArray(raw) ? raw.map((v) => typeof v) : [];
 
     let items =
       (raw || [])
-        .map((str) => {
-          try {
-            return JSON.parse(str);
-          } catch {
-            return null;
-          }
-        })
-        .map(normalizeItem)
-        .filter(Boolean) || [];
+        .map(coerceItem)   // trata string e objeto
+        .filter(Boolean);  // remove nulls
 
     // filtro opcional por tipo
     if (kindFilter === "chat" || kindFilter === "speaking") {
@@ -106,12 +124,12 @@ export default async function handler(req, res) {
       return ta - tb;
     });
 
-    // historyCount só pra debug
     return res.status(200).json({
       items,
       userId: user,
       historyCount: raw ? raw.length : 0,
       key,
+      rawTypes, // ajuda a entender se vem "string" ou "object"
     });
   } catch (e) {
     console.error("HISTORY error:", e);
