@@ -1071,16 +1071,15 @@ async function loadRemoteHistory() {
   try {
     const t = getToken();
 
-    // monta URL: /api/history ou /api/history?t=...
-    let url = "/api/history";
-    if (t) {
-      const params = new URLSearchParams();
-      params.set("t", t);
-      url += "?" + params.toString();
-    }
+    const params = new URLSearchParams();
+    if (t) params.set("t", t);
+    // param extra só pra garantir que o browser não cache
+    params.set("_", Date.now().toString());
+
+    const url = `/api/history?${params.toString()}`;
 
     const res = await fetch(url, { credentials: "include" });
-
+    
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
       // fallback: usa o que já tiver salvo localmente
