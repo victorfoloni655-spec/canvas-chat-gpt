@@ -88,6 +88,13 @@ async function appendHistory(userId, userText, botText) {
       ts: now,
     });
 
+    console.log('HISTORY_APPEND_CHAT', {
+  key,
+  userId,
+  userText,
+  botText
+});
+
     // adiciona user e bot de uma vez
     await redis.rpush(key, entryUser, entryBot);
     // mantém só os últimos N itens (N = HISTORY_MAX)
@@ -96,6 +103,8 @@ async function appendHistory(userId, userText, botText) {
     console.error("Erro ao salvar histórico:", e);
   }
 }
+
+console.log('HISTORY_TRIM_CHAT_OK', { key });
 
 // ====== OPENAI ======
 async function callOpenAI(messages) {
