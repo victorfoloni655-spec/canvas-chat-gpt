@@ -13,9 +13,7 @@ const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 
 function parseCookies(h = "") {
   return Object.fromEntries(
-    (h || "")
-      .split(";")
-      .map((s) => s.trim().split("="))
+    (h || "").split(";").map((s) => s.trim().split("="))
   );
 }
 
@@ -33,58 +31,56 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// Garante que todo item tenha um "kind"
+// Garante que itens antigos (sem "kind") sejam tratados como chat
 function normalizeItem(item) {
   if (!item) return null;
-  if (!item.kind) {
-    return { ...item, kind: "chat" };
-  }
+  if (!item.kind) return { ...item, kind: "chat" };
   return item;
+}
+
+// Resolve identidade de forma consistente com /api/chat e /api/speaking
+async function resolveUserId(req) {
+  const url = new URL(req.url, `https://${req.headers.host}`);
+  const uidParam = url.searchParams.get("uid");
+  const tQuery   = url.searchParams.get("t");
+
+  // 1) uid da URL (frontend manda ?uid=xxx)
+  if (uidParam) return uidParam;
+
+  // 2) token t (se existir)
+  if (tQuery) {
+    const fromT = await getUserFromToken(tQuery);
+    if (fromT) return fromT;
+  }
+
+  // 3) cookie LTI (Canvas)
+  const cookies = parseCookies(req.headers.cookie || "");
+  if (cookies["lti_user"]) return cookies["lti_user"];
+
+  return null;
 }
 
 export default async function handler(req, res) {
   try {
     const url = new URL(req.url, `https://${req.headers.host}`);
+    const kindFilter = url.searchParams.get("kind"); // "chat" ou "speaking" (opcional)
+    const limitParam = url.searchParams.get("limit");
 
-    const t          = url.searchParams.get("t");     // token JWT (opcional)
-    const uidParam   = url.searchParams.get("uid");   // userId forçado (opcional)
-    const kindFilter = url.searchParams.get("kind");  // "chat" ou "speaking" (opcional)
-    const limitParam = url.searchParams.get("limit"); // qtd máx itens (opcional)
-
-    // limite máx de itens retornados
     let limit = Number(limitParam) || 400;
-    if (limit < 10)   limit = 10;
+    if (limit < 10) limit = 10;
     if (limit > 1000) limit = 1000;
 
-    let userId = null;
+    const user = await resolveUserId(req);
 
-    // 1) se veio uid na query, ele manda
-    if (uidParam) {
-      userId = uidParam;
-    }
-
-    // 2) se não, tenta token t (JWT)
-    if (!userId && t) {
-      userId = await getUserFromToken(t);
-    }
-
-    // 3) se ainda não, cai no cookie lti_user
-    if (!userId) {
-      const cookies = parseCookies(req.headers.cookie || "");
-      userId = cookies["lti_user"] || null;
-    }
-
-    if (!userId) {
+    if (!user) {
       return res.status(401).json({
         error: "no_identity",
-        detail: "Abra pelo Canvas (LTI) ou envie um token para recuperar o histórico.",
+        detail: "Não foi possível identificar o usuário para recuperar o histórico.",
       });
     }
 
-    const key = historyKey(userId);
-
-    // pega só os últimos "limit" registros
-    const raw = await redis.lrange(key, -limit, -1); // lista de strings JSON
+    const key = historyKey(user);
+    const raw = await redis.lrange(key, -limit, -1); // últimos N registros
 
     let items =
       (raw || [])
@@ -103,21 +99,14 @@ export default async function handler(req, res) {
       items = items.filter((it) => it.kind === kindFilter);
     }
 
-    // ordena por timestamp crescente (se tiver ts)
+    // ordena por timestamp crescente
     items.sort((a, b) => {
       const ta = typeof a.ts === "number" ? a.ts : 0;
       const tb = typeof b.ts === "number" ? b.ts : 0;
       return ta - tb;
     });
 
-    // DEBUG importante:
-    console.log("HISTORY endpoint →", {
-      userId,
-      key,
-      count: items.length,
-    });
-
-    return res.status(200).json({ items, userId });
+    return res.status(200).json({ items, userId: user });
   } catch (e) {
     console.error("HISTORY error:", e);
     return res.status(500).json({ error: e?.message || "history error" });
