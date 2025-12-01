@@ -19,18 +19,16 @@ const SPEAKING_LIMIT_SECONDS =
   Number(process.env.SPEAKING_MONTHLY_LIMIT_SECONDS) ||
   (Number(process.env.SPEAKING_MONTHLY_LIMIT_MINUTES || 20) * 60);
 
-// NOVO: URLs de checkout para minutos extras
+// URLs de checkout para minutos extras
 const CHECKOUT_URL_SPEAK_5  = process.env.CHECKOUT_URL_SPEAK_5 || null;
 const CHECKOUT_URL_SPEAK_10 = process.env.CHECKOUT_URL_SPEAK_10 || null;
 
-// NOVO: histórico integrado
+// Histórico integrado (mesma chave do chat)
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
-// pode usar o mesmo HISTORY_MAX do chat (40) ou outro.
-// aqui deixei 80 pra caber mais práticas de áudio se quiser.
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 80);
 
 function parseCookies(h = "") {
-  return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
+  return Object.fromEntries((h || "").split(";").map((s) => s.trim().split("=")));
 }
 
 function monthKey(userId) {
@@ -60,7 +58,11 @@ async function readJson(req) {
     req.on("data", (c) => (d += c));
     req.on("end", () => resolve(d));
   });
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
 }
 
 // --------- OpenAI: transcrição (Whisper) ---------
@@ -142,7 +144,7 @@ async function buildFeedback(transcript) {
   // Complemento vindo da Vercel (você ajusta sem tocar no código)
   const extra = process.env.SPEAKING_FEEDBACK_PROMPT_PT || "";
 
-  const systemPrompt = baseSystem + (extra ? ("\n" + extra) : "");
+  const systemPrompt = baseSystem + (extra ? "\n" + extra : "");
 
   const userPrompt =
     `Transcrição aproximada da fala do aluno:\n"${transcript}".\n\n` +
@@ -233,25 +235,20 @@ async function synthesizeSpeech(text) {
 function extractMainTip(feedback) {
   if (!feedback) return "";
 
-  // separa em linhas e limpa
   const lines = feedback
     .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(l => l);
+    .map((l) => l.trim())
+    .filter((l) => l);
 
   if (!lines.length) return "";
 
   let first = lines[0];
 
-  // se a primeira linha for algo tipo "Feedback:" e houver outra, usa a segunda
   if (/^feedback\b/i.test(first) && lines[1]) {
     first = lines[1];
   }
 
-  // remove bullets simples: "-", "•"
   first = first.replace(/^[\-\u2022]\s*/, "");
-
-  // remove numeração tipo "1.", "1)", "1 -" no começo
   first = first.replace(/^[0-9]+\s*[\.\)\-]\s*/, "");
 
   return first;
@@ -263,7 +260,6 @@ function buildSpokenText(correct_sentence, feedback_text) {
   const sent = (correct_sentence || "").trim();
   const tip = extractMainTip(feedback_text || "");
 
-  // se não conseguir extrair nada decente, usa uma dica genérica
   const ptPart = tip
     ? `Dica rápida: ${tip}`
     : "Dica rápida: preste atenção na pronúncia e no ritmo dessa frase.";
@@ -291,18 +287,18 @@ async function appendSpeakingHistory(userId, {
     const entryUser = JSON.stringify({
       kind: "speaking",
       role: "user",
-      audioBase64: userAudioBase64 || null,  // áudio que o aluno gravou
-      transcript: transcript || null,        // transcrição do que ele falou
+      audioBase64: userAudioBase64 || null,
+      transcript: transcript || null,
       ts: now,
     });
 
     const entryBot = JSON.stringify({
       kind: "speaking",
       role: "assistant",
-      transcript: transcript || null,        // o que o sistema entendeu
+      transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      audioBase64: ttsAudioBase64 || null,   // áudio gerado pela IA (TTS)
+      audioBase64: ttsAudioBase64 || null,
       ts: now,
     });
 
@@ -311,6 +307,31 @@ async function appendSpeakingHistory(userId, {
   } catch (e) {
     console.error("Erro ao salvar histórico speaking:", e);
   }
+}
+
+// --------- resolver identidade (uid / token / cookie) ---------
+
+async function resolveUserId(req, body) {
+  const url = new URL(req.url, `https://${req.headers.host}`);
+  const uidParam = url.searchParams.get("uid");
+  const tQuery   = url.searchParams.get("t");
+
+  const uidBody = body?.uid;
+  const tBody   = body?.t;
+
+  if (uidBody) return uidBody;
+  if (uidParam) return uidParam;
+
+  const token = tBody || tQuery;
+  if (token) {
+    const fromT = await getUserIdFromToken(token);
+    if (fromT) return fromT;
+  }
+
+  const cookies = parseCookies(req.headers.cookie || "");
+  if (cookies["lti_user"]) return cookies["lti_user"];
+
+  return null;
 }
 
 // --------- handler principal ---------
@@ -322,24 +343,18 @@ export default async function handler(req, res) {
     }
 
     const body = await readJson(req);
-    const { audio, durationMs, t } = body || {};
+    const { audio, durationMs } = body || {};
 
     if (!audio || typeof audio !== "string") {
       return res.status(400).json({ error: "audio base64 é obrigatório" });
     }
 
-    // identidade: cookie LTI -> token t
-    const cookies = parseCookies(req.headers.cookie || "");
-    let userId = cookies["lti_user"] || null;
-
-    if (!userId && t) {
-      userId = await getUserIdFromToken(t);
-    }
+    const userId = await resolveUserId(req, body);
 
     if (!userId) {
       return res.status(401).json({
         error: "no_user",
-        message: "Abra pelo Canvas (LTI) para usar o Speaking Lab.",
+        message: "Abra pelo Canvas (LTI) ou use um uid para usar o Speaking Lab.",
       });
     }
 
@@ -349,7 +364,6 @@ export default async function handler(req, res) {
     if (typeof durationMs === "number" && durationMs > 0) {
       secondsThisCall = Math.round(durationMs / 1000);
     } else {
-      // fallback conservador caso durationMs não venha
       const approxSeconds = Math.round((audio.length * 3) / (4 * 32000));
       secondsThisCall = approxSeconds > 0 ? approxSeconds : 1;
     }
@@ -408,11 +422,10 @@ export default async function handler(req, res) {
     const transcript = await transcribeAudio(audio);
     const { correct_sentence, feedback_text } = await buildFeedback(transcript || "");
 
-    // texto final que vira áudio: "Check this: ... Dica rápida: ..."
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
-    // 🔵 NOVO: salva histórico integrado (speaking) no Redis
+    // salva histórico integrado (speaking) no Redis
     await appendSpeakingHistory(userId, {
       userAudioBase64: audio,
       transcript,
