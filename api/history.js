@@ -45,6 +45,7 @@ function normalizeItem(item) {
 
 export default async function handler(req, res) {
   try {
+    // Identidade: token 't' (mobile) ou cookie lti_user (desktop)
     const url = new URL(req.url, `https://${req.headers.host}`);
     const t = url.searchParams.get("t");
     const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
@@ -55,12 +56,13 @@ export default async function handler(req, res) {
     if (limit < 10) limit = 10;
     if (limit > 1000) limit = 1000;
 
-    // 🔴 IMPORTANTE: mesma lógica de identidade do /api/chat e /api/speaking
-    const cookies = parseCookies(req.headers.cookie || "");
-    let user = cookies["lti_user"] || null;
-
-    if (!user && t) {
+    let user = null;
+    if (t) {
       user = await getUserFromToken(t);
+    }
+    if (!user) {
+      const cookies = parseCookies(req.headers.cookie || "");
+      user = cookies["lti_user"] || null;
     }
 
     if (!user) {
@@ -73,14 +75,7 @@ export default async function handler(req, res) {
     const key = historyKey(user);
 
     // pega só os últimos "limit" registros
-    console.log('HISTORY_READ', { key, user });
-
     const raw = await redis.lrange(key, -limit, -1); // lista de strings JSON
-
-    console.log('HISTORY_READ_RESULT', {
-  key,
-  length: raw ? raw.length : 0
-});
 
     let items =
       (raw || [])
