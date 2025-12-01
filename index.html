@@ -792,17 +792,30 @@ function updateBadge() {
 /* ---------- TROCA DE TELA ---------- */
 function setMode(mode) {
   currentMode = mode;
+
   if (mode === 'chat') {
     tabChat.classList.add('active');
     tabSpeak.classList.remove('active');
     chatSection.style.display  = 'flex';
     speakSection.style.display = 'none';
+
+    // garante que o chat abra sempre no final
+    setTimeout(() => {
+      chat.scrollTop = chat.scrollHeight;
+    }, 50);
   } else {
     tabChat.classList.remove('active');
     tabSpeak.classList.add('active');
     chatSection.style.display  = 'none';
     speakSection.style.display = 'flex';
+
+    // 👇 aqui é o que você pediu:
+    // sempre que abrir a aba de Pronunciation, rola pro último áudio
+    setTimeout(() => {
+      speakConversation.scrollTop = speakConversation.scrollHeight;
+    }, 50);
   }
+
   updateBadge();
 }
 
