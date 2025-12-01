@@ -385,6 +385,7 @@ const CHAT_URL    = '/api/chat';
 const QUOTA_URL   = '/api/quota';
 const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
+const LOCAL_UID_KEY           = 'ia_english_uid_v1';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -396,13 +397,14 @@ const speakSection = document.getElementById('speak-section');
 const tabChat  = document.getElementById('tab-chat');
 const tabSpeak = document.getElementById('tab-speak');
 
+// SPEAKING DOM
 const recordBtn        = document.getElementById('record-btn');
 const cancelRecordBtn  = document.getElementById('cancel-record-btn');
 const recordTimer      = document.getElementById('record-timer');
 const speakStatus      = document.getElementById('speak-status');
 const speakConversation= document.getElementById('speak-conversation');
 
-/* ---------- TOKEN LTI / JWT ---------- */
+/* ---------- TOKEN LTI ---------- */
 function captureTokenFromURL(){
   const u = new URL(window.location.href);
   const t = u.searchParams.get('t');
@@ -415,6 +417,28 @@ function captureTokenFromURL(){
 }
 function getToken(){
   return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
+}
+
+/* ---------- UID LOCAL (multi-dispositivo) ---------- */
+function getOrCreateLocalUid() {
+  try {
+    let uid = localStorage.getItem(LOCAL_UID_KEY);
+    if (!uid) {
+      if (window.crypto && crypto.randomUUID) {
+        uid = crypto.randomUUID();
+      } else {
+        uid = 'u-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
+      localStorage.setItem(LOCAL_UID_KEY, uid);
+    }
+    return uid;
+  } catch (e) {
+    console.error('Erro ao acessar localStorage para UID:', e);
+    if (!window.__ia_uid_fallback) {
+      window.__ia_uid_fallback = 'u-' + Math.random().toString(36).slice(2);
+    }
+    return window.__ia_uid_fallback;
+  }
 }
 
 /* ---------- ESTADO ---------- */
@@ -490,7 +514,7 @@ function addSpeakCTAPackages(packages){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* ---------- HISTÓRICO LOCAL (AINDA COMO BACKUP, MAS NÃO É PRIORIDADE) ---------- */
+/* ---------- HISTÓRICO CHAT (localStorage) ---------- */
 function saveLocalHistory(role, content) {
   try {
     const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
@@ -528,7 +552,7 @@ function loadLocalHistory() {
   }
 }
 
-/* ---------- HISTÓRICO SPEAKING LOCAL ---------- */
+/* ---------- HISTÓRICO SPEAKING (localStorage) ---------- */
 function saveSpeakHistory(entry) {
   try {
     const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
@@ -547,6 +571,7 @@ function saveSpeakHistory(entry) {
   }
 }
 
+/* Renderização pura (sem salvar) */
 function renderStudentAudioMessage(base64){
   const el = document.createElement('div');
   el.className = 'msg user speak-msg';
@@ -558,7 +583,7 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* helpers html/diff */
+/* ---------- helpers de HTML/diff ---------- */
 function escapeHtml(str){
   return String(str || "")
     .replace(/&/g,"&amp;")
@@ -645,6 +670,7 @@ function renderAIAudioMessage(data){
   }
 
   const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
+
   const sameSentence =
     transcript && correct_sentence &&
     normalizeSentence(transcript) === normalizeSentence(correct_sentence);
@@ -671,6 +697,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
+/* Versões que renderizam + salvam */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -741,7 +768,7 @@ async function atualizarQuotaChat(){
   }
 }
 
-/* ---------- BADGE ---------- */
+/* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
     if (chatQuota) {
@@ -791,8 +818,9 @@ async function send(){
   messages.push({ role: "user", content: text });
 
   try {
-    const t = getToken();
-    const body = { messages };
+    const t   = getToken();
+    const uid = getOrCreateLocalUid();
+    const body = { messages, uid };
     if (t) body.t = t;
 
     const res = await fetch(CHAT_URL, {
@@ -834,7 +862,7 @@ async function send(){
   }
 }
 
-/* ---------- Ajustes teclado mobile ---------- */
+/* ---------- Fix teclado mobile (chat) ---------- */
 (function fixViewportForKeyboard(){
   const vv = window.visualViewport;
   if (!vv || !chat) return;
@@ -981,8 +1009,9 @@ function showSpeakingResult(data){
 
 async function sendSpeakingAudio(base64, durationMs){
   try {
-    const t = getToken();
-    const body = { audio: base64, durationMs };
+    const t   = getToken();
+    const uid = getOrCreateLocalUid();
+    const body = { audio: base64, durationMs, uid };
     if (t) body.t = t;
 
     const res = await fetch('/api/speaking', {
@@ -1040,43 +1069,38 @@ cancelRecordBtn.addEventListener('click', () => {
 /* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
 async function loadRemoteHistory() {
   try {
-    const t = getToken();
-    const params = new URLSearchParams();
-    if (t) params.set('t', t);
-    const url = `/api/history?${params.toString()}`;
+    const t   = getToken();
+    const uid = getOrCreateLocalUid();
+
+    let url = `/api/history?uid=${encodeURIComponent(uid)}`;
+    if (t) {
+      url += `&t=${encodeURIComponent(t)}`;
+    }
 
     const res = await fetch(url, { credentials: 'include' });
 
     if (!res.ok) {
       console.error('Erro ao carregar histórico remoto:', res.status);
-      // se quiser, pode chamar loadLocalHistory() aqui.
+      loadLocalHistory();
       return;
     }
 
     const data = await res.json().catch(() => ({}));
-    let items = Array.isArray(data.items) ? data.items : [];
-
-    // Filtra qualquer item legado quebrado
-    items = items.filter(it => {
-      if (!it) return false;
-      if (typeof it.content !== 'string') return false;
-      const txt = it.content.trim();
-      if (!txt) return false;
-      if (/^\[object\b/i.test(txt)) return false; // lixo antigo
-      if (typeof it.ts !== 'number' || it.ts <= 0) return false; // registros sem timestamp real
-      return true;
-    });
+    const items = Array.isArray(data.items) ? data.items : [];
 
     if (!items.length) {
-      console.warn('Histórico remoto sem itens válidos. Mantendo a tela limpa.');
+      console.warn('Histórico remoto vazio; usando fallback localStorage.');
+      loadLocalHistory();
       return;
     }
 
-    // já vem ordenado, mas garantimos
+    // garante em ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach(item => {
-      // 1) SPEAKING
+      if (!item) return;
+
+      // SPEAKING
       if (item.kind === 'speaking') {
         if (item.role === 'user' && item.audioBase64) {
           renderStudentAudioMessage(item.audioBase64);
@@ -1091,25 +1115,26 @@ async function loadRemoteHistory() {
         return;
       }
 
-      // 2) CHAT
-      const txt = String(item.content || '');
+      // CHAT
+      if (typeof item.content !== 'string') return;
       const who = item.role === 'user' ? 'user' : 'bot';
-      addMsg(txt, who);
+      addMsg(item.content, who);
+
       const role = who === 'user' ? 'user' : 'assistant';
-      messages.push({ role, content: txt });
+      messages.push({ role, content: item.content });
     });
   } catch (err) {
     console.error('Erro ao buscar histórico remoto:', err);
-    // opcional: loadLocalHistory();
+    loadLocalHistory();
   }
 }
 
 /* ---------- INIT ---------- */
 captureTokenFromURL();
+getOrCreateLocalUid();   // garante que exista um uid
 setMode('chat');
 atualizarQuotaChat();
 loadRemoteHistory();
-loadSpeakHistory();
 </script>
 </body>
 </html>
