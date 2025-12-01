@@ -73,7 +73,14 @@ export default async function handler(req, res) {
     const key = historyKey(user);
 
     // pega só os últimos "limit" registros
+    console.log('HISTORY_READ', { key, user });
+
     const raw = await redis.lrange(key, -limit, -1); // lista de strings JSON
+
+    console.log('HISTORY_READ_RESULT', {
+  key,
+  length: raw ? raw.length : 0
+});
 
     let items =
       (raw || [])
