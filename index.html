@@ -1066,72 +1066,83 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
-/* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
+// ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
 async function loadRemoteHistory() {
   try {
-    const t   = getToken();
-    const uid = getOrCreateLocalUid();
+    const t = getToken();
 
-    let url = `/api/history?uid=${encodeURIComponent(uid)}`;
+    // monta URL: /api/history ou /api/history?t=...
+    let url = "/api/history";
     if (t) {
-      url += `&t=${encodeURIComponent(t)}`;
+      const params = new URLSearchParams();
+      params.set("t", t);
+      url += "?" + params.toString();
     }
 
-    const res = await fetch(url, { credentials: 'include' });
+    const res = await fetch(url, { credentials: "include" });
 
     if (!res.ok) {
-      console.error('Erro ao carregar histórico remoto:', res.status);
+      console.error("Erro ao carregar histórico remoto:", res.status);
+      // fallback: usa o que já tiver salvo localmente
       loadLocalHistory();
+      loadSpeakHistory();
       return;
     }
 
     const data = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
 
+    // se não tiver nada no Redis, volta pro localStorage
     if (!items.length) {
-      console.warn('Histórico remoto vazio; usando fallback localStorage.');
+      console.log("Histórico remoto vazio; usando fallback localStorage.");
       loadLocalHistory();
+      loadSpeakHistory();
       return;
     }
 
-    // garante em ordem cronológica
+    // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
-    items.forEach(item => {
+    items.forEach((item) => {
       if (!item) return;
 
-      // SPEAKING
-      if (item.kind === 'speaking') {
-        if (item.role === 'user' && item.audioBase64) {
+      // 1) SPEAKING (kind === "speaking")
+      if (item.kind === "speaking") {
+        if (item.role === "user" && item.audioBase64) {
+          // áudio enviado pelo aluno
           renderStudentAudioMessage(item.audioBase64);
-        } else if (item.role === 'assistant') {
+        } else if (item.role === "assistant") {
+          // resposta da IA com TTS + feedback
           renderAIAudioMessage({
-            transcript: item.transcript || '',
-            correct_sentence: item.correct_sentence || '',
-            feedback_text: item.feedback_text || '',
-            audioBase64: item.audioBase64 || null
+            transcript: item.transcript || "",
+            correct_sentence: item.correct_sentence || "",
+            feedback_text: item.feedback_text || "",
+            audioBase64: item.audioBase64 || null,
           });
         }
-        return;
+        return; // não deixa cair na parte de chat
       }
 
-      // CHAT
-      if (typeof item.content !== 'string') return;
-      const who = item.role === 'user' ? 'user' : 'bot';
+      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
+      if (typeof item.content !== "string") return;
+
+      const who = item.role === "user" ? "user" : "bot";
       addMsg(item.content, who);
 
-      const role = who === 'user' ? 'user' : 'assistant';
+      // alimenta o array messages pra manter o contexto da conversa
+      const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
   } catch (err) {
-    console.error('Erro ao buscar histórico remoto:', err);
+    console.error("Erro ao buscar histórico remoto:", err);
+    // fallback local se der erro na rede
     loadLocalHistory();
+    loadSpeakHistory();
   }
 }
 
 /* ---------- INIT ---------- */
 captureTokenFromURL();
-getOrCreateLocalUid();   // garante que exista um uid
 setMode('chat');
 atualizarQuotaChat();
 loadRemoteHistory();
