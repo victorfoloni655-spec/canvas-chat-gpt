@@ -13,9 +13,7 @@ const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 
 function parseCookies(h = "") {
   return Object.fromEntries(
-    (h || "")
-      .split(";")
-      .map((s) => s.trim().split("="))
+    (h || "").split(";").map((s) => s.trim().split("="))
   );
 }
 
@@ -33,52 +31,48 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// Normaliza itens antigos (sem "kind") como chat
-function normalizeItem(item) {
-  if (!item) return null;
-  if (!item.kind) return { ...item, kind: "chat" };
-  return item;
-}
+// Normaliza cada item vindo do Redis:
+// - se vier string, faz JSON.parse
+// - se vier objeto, usa direto
+// - se não tiver "kind", assume "chat"
+function normalizeItem(raw) {
+  if (!raw) return null;
 
-// Aceita tanto string (JSON) quanto objeto já desserializado
-function coerceItem(val) {
-  if (!val) return null;
+  let item = raw;
 
-  // Caso upstash já devolva objeto
-  if (typeof val === "object") {
-    return normalizeItem(val);
-  }
-
-  // Caso seja string JSON
-  if (typeof val === "string") {
+  if (typeof raw === "string") {
     try {
-      const parsed = JSON.parse(val);
-      return normalizeItem(parsed);
+      item = JSON.parse(raw);
     } catch {
       return null;
     }
   }
 
-  // Outros tipos ignoramos
-  return null;
+  if (!item || typeof item !== "object") return null;
+
+  if (!item.kind) {
+    item.kind = "chat";
+  }
+
+  return item;
 }
 
-// Resolve identidade de forma consistente com /api/chat e /api/speaking
+// Resolve identidade igual ao /api/chat e /api/speaking
 async function resolveUserId(req) {
   const url = new URL(req.url, `https://${req.headers.host}`);
   const uidParam = url.searchParams.get("uid");
   const tQuery   = url.searchParams.get("t");
 
-  // 1) uid da URL (o front sempre manda ?uid=xxx)
+  // 1) uid explícito na URL (se algum dia usar)
   if (uidParam) return uidParam;
 
-  // 2) token t (se existir)
+  // 2) token t (LTI mobile Canvas)
   if (tQuery) {
     const fromT = await getUserFromToken(tQuery);
     if (fromT) return fromT;
   }
 
-  // 3) cookie LTI (Canvas)
+  // 3) cookie LTI (Canvas web)
   const cookies = parseCookies(req.headers.cookie || "");
   if (cookies["lti_user"]) return cookies["lti_user"];
 
@@ -87,37 +81,42 @@ async function resolveUserId(req) {
 
 export default async function handler(req, res) {
   try {
+    // desliga cache pra sempre pegar o histórico mais novo
+    res.setHeader("Cache-Control", "no-store");
+
     const url = new URL(req.url, `https://${req.headers.host}`);
-    const kindFilter = url.searchParams.get("kind"); // "chat" ou "speaking" (opcional)
+    const kindFilter = url.searchParams.get("kind"); // opcional
+    const limitParam = url.searchParams.get("limit");
 
-    const user = await resolveUserId(req);
+    let limit = Number(limitParam) || 400;
+    if (limit < 10) limit = 10;
+    if (limit > 1000) limit = 1000;
 
-    if (!user) {
+    const userId = await resolveUserId(req);
+
+    if (!userId) {
       return res.status(401).json({
         error: "no_identity",
         detail: "Não foi possível identificar o usuário para recuperar o histórico.",
       });
     }
 
-    const key = historyKey(user);
+    const key = historyKey(userId);
 
-    // Pega tudo (o tamanho já é limitado pelo LTRIM em /api/chat e /api/speaking)
-    const raw = await redis.lrange(key, 0, -1);
-
-    // Só pra debug: ver tipos que estão vindo
-    const rawTypes = Array.isArray(raw) ? raw.map((v) => typeof v) : [];
+    // pega os últimos N registros (user+assistant, chat+speaking)
+    const raw = await redis.lrange(key, -limit, -1);
 
     let items =
       (raw || [])
-        .map(coerceItem)   // trata string e objeto
-        .filter(Boolean);  // remove nulls
+        .map(normalizeItem)
+        .filter(Boolean) || [];
 
-    // filtro opcional por tipo
+    // filtro por tipo de histórico (chat / speaking)
     if (kindFilter === "chat" || kindFilter === "speaking") {
       items = items.filter((it) => it.kind === kindFilter);
     }
 
-    // ordena por timestamp crescente
+    // ordena por timestamp
     items.sort((a, b) => {
       const ta = typeof a.ts === "number" ? a.ts : 0;
       const tb = typeof b.ts === "number" ? b.ts : 0;
@@ -126,10 +125,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       items,
-      userId: user,
-      historyCount: raw ? raw.length : 0,
+      userId,
+      historyCount: items.length,
       key,
-      rawTypes, // ajuda a entender se vem "string" ou "object"
     });
   } catch (e) {
     console.error("HISTORY error:", e);
