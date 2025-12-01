@@ -379,8 +379,12 @@
   </div>
 
 <script>
-const CHAT_URL  = '/api/chat';
-const QUOTA_URL = '/api/quota';
+const CHAT_URL    = '/api/chat';
+const QUOTA_URL   = '/api/quota';
+const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
+const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
+const SERVER_USER_ID_KEY      = 'ia_english_server_user_id'; // NEW
+
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -690,6 +694,7 @@ async function send(){
   const text = input.value.trim();
   if(!text) return;
   addMsg(text, 'user');
+  saveLocalHistory('user', text);
   input.value = '';
   btn.disabled = true;
 
@@ -725,8 +730,19 @@ async function send(){
     }
 
     const data = await res.json();
+
+    // 🔵 NOVO: guardar userId que o servidor está usando
+    if (data.userId) {
+      try {
+        localStorage.setItem(SERVER_USER_ID_KEY, data.userId);
+      } catch (e) {
+        console.error('Erro ao salvar userId local:', e);
+      }
+    }
+
     const reply = data.reply || "(sem conteúdo)";
     addMsg(reply, 'bot');
+    saveLocalHistory('assistant', reply);
     messages.push({ role: "assistant", content: reply });
 
     btn.disabled = false;
@@ -945,27 +961,49 @@ cancelRecordBtn.addEventListener('click', () => {
 async function loadRemoteHistory() {
   try {
     const t = getToken();
-    const url = t
-      ? `/api/history?t=${encodeURIComponent(t)}`
-      : '/api/history';
+    let uid = null;
+    try {
+      uid = localStorage.getItem(SERVER_USER_ID_KEY);
+    } catch (e) {
+      uid = null;
+    }
+
+    let url = '/api/history';
+    const params = [];
+    if (uid) params.push(`uid=${encodeURIComponent(uid)}`);
+    if (t)   params.push(`t=${encodeURIComponent(t)}`);
+    if (params.length > 0) {
+      url += '?' + params.join('&');
+    }
 
     const res = await fetch(url, { credentials: 'include' });
 
     if (!res.ok) {
       console.error('Erro ao carregar histórico remoto:', res.status);
+      // fallback: usa histórico local se der erro
+      loadLocalHistory();
+      loadSpeakHistory();
       return;
     }
 
     const data = await res.json().catch(() => ({}));
-    const items = Array.isArray(data.items) ? data.items : [];
+    let items = Array.isArray(data.items) ? data.items : [];
+
+    // se vier vazio do servidor, cai pro localStorage
+    if (!items.length) {
+      console.warn('Histórico remoto vazio; usando fallback localStorage.');
+      loadLocalHistory();
+      loadSpeakHistory();
+      return;
+    }
 
     // garante em ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
-    items.forEach(item => {
+    items.forEach((item) => {
       if (!item) return;
 
-      // SPEAKING
+      // 1) SPEAKING
       if (item.kind === 'speaking') {
         if (item.role === 'user' && item.audioBase64) {
           renderStudentAudioMessage(item.audioBase64);
@@ -974,13 +1012,13 @@ async function loadRemoteHistory() {
             transcript: item.transcript || '',
             correct_sentence: item.correct_sentence || '',
             feedback_text: item.feedback_text || '',
-            audioBase64: item.audioBase64 || null
+            audioBase64: item.audioBase64 || null,
           });
         }
         return;
       }
 
-      // CHAT (inclui históricos antigos sem 'kind')
+      // 2) CHAT (inclui antigos sem "kind")
       if (typeof item.content !== 'string') return;
 
       const who = item.role === 'user' ? 'user' : 'bot';
@@ -991,6 +1029,9 @@ async function loadRemoteHistory() {
     });
   } catch (err) {
     console.error('Erro ao buscar histórico remoto:', err);
+    // fallback em caso de erro de rede
+    loadLocalHistory();
+    loadSpeakHistory();
   }
 }
 
