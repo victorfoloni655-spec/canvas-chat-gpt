@@ -34,7 +34,6 @@ function historyKey(userId) {
 }
 
 // Garante que todo item tenha um "kind"
-// (os antigos, que só tinham role/content, viram kind:"chat")
 function normalizeItem(item) {
   if (!item) return null;
   if (!item.kind) {
@@ -45,24 +44,32 @@ function normalizeItem(item) {
 
 export default async function handler(req, res) {
   try {
-    // pega query params
     const url = new URL(req.url, `https://${req.headers.host}`);
-    const t = url.searchParams.get("t");
+
+    // novo: uid vindo do front (o mesmo userId que o /api/chat usa)
+    const uidParam   = url.searchParams.get("uid");
+    const t          = url.searchParams.get("t");
     const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
     const limitParam = url.searchParams.get("limit");
 
-    // limite máx de itens retornados
     let limit = Number(limitParam) || 400;
     if (limit < 10) limit = 10;
     if (limit > 1000) limit = 1000;
 
-    // 👇 AGORA: mesmo padrão do /api/chat e /api/speaking
-    const cookies = parseCookies(req.headers.cookie || "");
-    let user = cookies["lti_user"] || null;   // 1º tenta cookie
+    let user = null;
 
-    // se não tiver cookie (ex: mobile), tenta token t
-    if (!user && t) {
+    // 1º prioridade: uid explícito (vem direto do /api/chat)
+    if (uidParam) {
+      user = uidParam;
+    } else if (t) {
+      // 2º: token JWT, se tiver
       user = await getUserFromToken(t);
+    }
+
+    // 3º: fallback cookie lti_user
+    if (!user) {
+      const cookies = parseCookies(req.headers.cookie || "");
+      user = cookies["lti_user"] || null;
     }
 
     if (!user) {
@@ -75,7 +82,7 @@ export default async function handler(req, res) {
     const key = historyKey(user);
 
     // pega só os últimos "limit" registros
-    const raw = await redis.lrange(key, -limit, -1); // lista de strings JSON
+    const raw = await redis.lrange(key, -limit, -1);
 
     let items =
       (raw || [])
@@ -89,19 +96,21 @@ export default async function handler(req, res) {
         .map(normalizeItem)
         .filter(Boolean) || [];
 
-    // filtro opcional por tipo
     if (kindFilter === "chat" || kindFilter === "speaking") {
       items = items.filter((it) => it.kind === kindFilter);
     }
 
-    // ordena por timestamp crescente (se tiver ts)
     items.sort((a, b) => {
       const ta = typeof a.ts === "number" ? a.ts : 0;
       const tb = typeof b.ts === "number" ? b.ts : 0;
       return ta - tb;
     });
 
-    return res.status(200).json({ items });
+    return res.status(200).json({
+      items,
+      // debug leve, só pra conferência se precisar
+      // debug: { user, key, count: items.length },
+    });
   } catch (e) {
     console.error("HISTORY error:", e);
     return res.status(500).json({ error: e?.message || "history error" });
