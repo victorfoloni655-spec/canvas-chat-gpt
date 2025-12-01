@@ -17,8 +17,8 @@ const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
 
-// Histórico
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+// Histórico – AGORA COM PREFIXO NOVO
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history2";
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40);
 
 const redis = new Redis({
@@ -75,20 +75,15 @@ async function resolveUserId(req, body) {
   const uidBody = body?.uid;
   const tBody   = body?.t;
 
-  // 1) uid vindo do body (frontend manda em todas as chamadas)
   if (uidBody) return uidBody;
-
-  // 2) uid via query (se algum dia usar)
   if (uidParam) return uidParam;
 
-  // 3) token t
   const token = tBody || tQuery;
   if (token) {
     const fromT = await getUserIdFromToken(token);
     if (fromT) return fromT;
   }
 
-  // 4) cookie LTI
   const cookies = parseCookies(req.headers.cookie || "");
   if (cookies["lti_user"]) {
     return cookies["lti_user"];
@@ -194,24 +189,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // Texto da última mensagem do aluno (pra salvar no histórico)
+    // pega a última mensagem do aluno pra salvar no histórico
     const lastUserMsg = messages
       .slice()
       .reverse()
       .find((m) => m.role === "user");
     const userTextForHistory = lastUserMsg?.content || "";
 
-    // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
-    // Salva histórico
     await appendHistory(userId, userTextForHistory, reply);
 
-    // Debug: quantos itens existem nessa lista?
+    // debug opcional
     let historyDebugCount = 0;
     try {
-      const debugRaw = await redis.lrange(historyKey(userId), 0, -1);
-      historyDebugCount = debugRaw.length;
+      const raw = await redis.lrange(historyKey(userId), 0, -1);
+      historyDebugCount = raw.length;
     } catch (e) {
       console.error("Erro ao ler histórico para debug:", e);
     }
