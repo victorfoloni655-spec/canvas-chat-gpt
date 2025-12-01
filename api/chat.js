@@ -17,10 +17,11 @@ const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
 
-// Histórico
+// Histórico (compartilhado com /api/history.js)
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40); // 20 turnos (user+bot)
 
+// Redis (Upstash)
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -28,7 +29,11 @@ const redis = new Redis({
 
 // ====== UTILS ======
 function parseCookies(h = "") {
-  return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
+  return Object.fromEntries(
+    (h || "")
+      .split(";")
+      .map((s) => s.trim().split("="))
+  );
 }
 
 function monthKey(userId) {
@@ -70,59 +75,59 @@ function historyKey(userId) {
 
 // salva um turno simples: última pergunta do aluno + resposta da IA
 async function appendHistory(userId, userText, botText) {
+  if (!userId) return;
+
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
     const entryUser = JSON.stringify({
-      kind: "chat",                   // <--- identifica que é histórico do CHAT
+      kind: "chat",                   // identifica que é histórico do CHAT
       role: "user",
       content: String(userText || ""),
       ts: now,
     });
 
     const entryBot = JSON.stringify({
-      kind: "chat",                   // <--- idem
+      kind: "chat",
       role: "assistant",
       content: String(botText || ""),
       ts: now,
     });
-
-    console.log('HISTORY_APPEND_CHAT', {
-  key,
-  userId,
-  userText,
-  botText
-});
 
     // adiciona user e bot de uma vez
     await redis.rpush(key, entryUser, entryBot);
     // mantém só os últimos N itens (N = HISTORY_MAX)
     await redis.ltrim(key, -HISTORY_MAX, -1);
   } catch (e) {
-    console.error("Erro ao salvar histórico:", e);
+    console.error("HISTORY_APPEND_ERROR", e);
   }
 }
 
-console.log('HISTORY_TRIM_CHAT_OK', { key });
-
 // ====== OPENAI ======
 async function callOpenAI(messages) {
-  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY não configurada");
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY não configurada");
+  }
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model: OPENAI_MODEL, messages, temperature: 0.7 }),
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages,
+      temperature: 0.7,
+    }),
   });
 
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
     throw new Error(`OpenAI erro ${resp.status}: ${txt}`);
   }
+
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content ?? "";
 }
@@ -134,7 +139,13 @@ async function readJson(req) {
     req.on("data", (c) => (d += c));
     req.on("end", () => resolve(d));
   });
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }
 
 // ====== HANDLER ======
@@ -146,20 +157,23 @@ export default async function handler(req, res) {
 
     const body = await readJson(req);
     const { messages, t } = body || {};
+
     if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "messages must be a non-empty array" });
+      return res
+        .status(400)
+        .json({ error: "messages must be a non-empty array" });
     }
 
     // Identidade do aluno: cookie LTI -> token 't'
     const cookies = parseCookies(req.headers.cookie || "");
-    let counterId = cookies["lti_user"];
+    let userId = cookies["lti_user"] || null;
 
-    if (!counterId && t) {
+    if (!userId && t) {
       const fromT = await getUserIdFromToken(t);
-      if (fromT) counterId = fromT;
+      if (fromT) userId = fromT;
     }
 
-    if (!counterId) {
+    if (!userId) {
       return res.status(401).json({
         error: "no_user",
         detail: "Abra pelo Canvas (LTI) para identificar o aluno.",
@@ -167,13 +181,29 @@ export default async function handler(req, res) {
     }
 
     // Limite mensal
-    const key = monthKey(counterId);
+    const key = monthKey(userId);
     const { used, blocked } = await incrMonthlyAndCheck(key, MONTHLY_LIMIT);
+
     if (blocked) {
       const packages = [];
-      if (CHECKOUT_URL_50)  packages.push({ label: "+50 mensagens",  url: CHECKOUT_URL_50,  amount: 50  });
-      if (CHECKOUT_URL_100) packages.push({ label: "+100 mensagens", url: CHECKOUT_URL_100, amount: 100 });
-      if (CHECKOUT_URL_200) packages.push({ label: "+200 mensagens", url: CHECKOUT_URL_200, amount: 200 });
+      if (CHECKOUT_URL_50)
+        packages.push({
+          label: "+50 mensagens",
+          url: CHECKOUT_URL_50,
+          amount: 50,
+        });
+      if (CHECKOUT_URL_100)
+        packages.push({
+          label: "+100 mensagens",
+          url: CHECKOUT_URL_100,
+          amount: 100,
+        });
+      if (CHECKOUT_URL_200)
+        packages.push({
+          label: "+200 mensagens",
+          url: CHECKOUT_URL_200,
+          amount: 200,
+        });
 
       return res.status(429).json({
         error: "limit_reached",
@@ -188,19 +218,22 @@ export default async function handler(req, res) {
     const lastUserMsg = messages
       .slice()
       .reverse()
-      .find(m => m.role === "user");
+      .find((m) => m.role === "user");
     const userTextForHistory = lastUserMsg?.content || "";
 
     // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
     // Salva histórico (não bloqueia a resposta se der erro)
-    await appendHistory(counterId, userTextForHistory, reply);
+    await appendHistory(userId, userTextForHistory, reply);
 
     return res.status(200).json({ reply, used, limit: MONTHLY_LIMIT });
   } catch (e) {
     console.error("CHAT error:", e);
-    return res.status(500).json({ error: e?.message || "internal error" });
+    return res.status(500).json({
+      error: "internal_error",
+      message: e?.message || "Erro interno no chat.",
+    });
   }
 }
 
