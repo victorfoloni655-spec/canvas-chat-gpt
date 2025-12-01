@@ -1,6 +1,6 @@
 // /api/chat.js
 // Chat + limitador mensal + histórico simples no Redis.
-// Identidade: uid (body) OU token 't' (JWT) OU cookie lti_user.
+// Identidade: token 't' (JWT) OU cookie lti_user OU uid (body/query) como fallback.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -17,8 +17,8 @@ const CHECKOUT_URL_50  = process.env.CHECKOUT_URL_50  || null;
 const CHECKOUT_URL_100 = process.env.CHECKOUT_URL_100 || null;
 const CHECKOUT_URL_200 = process.env.CHECKOUT_URL_200 || null;
 
-// Histórico – AGORA COM PREFIXO NOVO
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history2";
+// Histórico
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 40);
 
 const redis = new Redis({
@@ -66,7 +66,7 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// resolve identidade de forma consistente com /api/history
+// ✅ NOVO: resolve identidade na mesma ordem que /api/history
 async function resolveUserId(req, body) {
   const url = new URL(req.url, `https://${req.headers.host}`);
   const uidParam = url.searchParams.get("uid");
@@ -75,19 +75,22 @@ async function resolveUserId(req, body) {
   const uidBody = body?.uid;
   const tBody   = body?.t;
 
-  if (uidBody) return uidBody;
-  if (uidParam) return uidParam;
-
+  // 1) token t (body ou query)
   const token = tBody || tQuery;
   if (token) {
     const fromT = await getUserIdFromToken(token);
     if (fromT) return fromT;
   }
 
+  // 2) cookie LTI (Canvas)
   const cookies = parseCookies(req.headers.cookie || "");
   if (cookies["lti_user"]) {
     return cookies["lti_user"];
   }
+
+  // 3) uid anônimo (fora do Canvas)
+  if (uidBody) return uidBody;
+  if (uidParam) return uidParam;
 
   return null;
 }
@@ -167,7 +170,7 @@ export default async function handler(req, res) {
     if (!userId) {
       return res.status(401).json({
         error: "no_user",
-        detail: "Não foi possível identificar o aluno (uid / token / cookie ausentes).",
+        detail: "Não foi possível identificar o aluno (token / cookie / uid ausentes).",
       });
     }
 
@@ -189,22 +192,24 @@ export default async function handler(req, res) {
       });
     }
 
-    // pega a última mensagem do aluno pra salvar no histórico
+    // Texto da última mensagem do aluno (pra salvar no histórico)
     const lastUserMsg = messages
       .slice()
       .reverse()
       .find((m) => m.role === "user");
     const userTextForHistory = lastUserMsg?.content || "";
 
+    // Chamada ao OpenAI
     const reply = await callOpenAI(messages);
 
+    // Salva histórico
     await appendHistory(userId, userTextForHistory, reply);
 
-    // debug opcional
+    // Debug: quantos itens existem nessa lista?
     let historyDebugCount = 0;
     try {
-      const raw = await redis.lrange(historyKey(userId), 0, -1);
-      historyDebugCount = raw.length;
+      const debugRaw = await redis.lrange(historyKey(userId), 0, -1);
+      historyDebugCount = debugRaw.length;
     } catch (e) {
       console.error("Erro ao ler histórico para debug:", e);
     }
