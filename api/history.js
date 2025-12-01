@@ -9,7 +9,8 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
+// AGORA usa "history2" por padrão
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history2";
 
 function parseCookies(h = "") {
   return Object.fromEntries(
@@ -31,7 +32,6 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-// Normaliza qualquer item em um formato seguro pro front
 function normalizeItem(src) {
   if (!src || typeof src !== "object") return null;
 
@@ -52,7 +52,6 @@ function normalizeItem(src) {
     }
   }
 
-  // tenta reaproveitar ts, senão 0
   if (typeof out.ts !== "number") {
     if (typeof out.timestamp === "number") {
       out.ts = out.timestamp;
@@ -64,19 +63,16 @@ function normalizeItem(src) {
   return out;
 }
 
-// Converte uma string crua do Redis em objeto de histórico
 function parseHistoryValue(raw) {
   if (raw == null) return null;
 
   let s = typeof raw === "string" ? raw : String(raw);
   let trimmed = s.trim();
 
-  // 1) Casos quebrados antigos: "[object Object]" (com ou sem espaços)
   if (/^\[object\b/i.test(trimmed)) {
-    return null; // simplesmente ignora
+    return null;
   }
 
-  // 2) Se for algo entre aspas, tenta interpretar
   if (
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
@@ -85,7 +81,7 @@ function parseHistoryValue(raw) {
       const inner = JSON.parse(trimmed);
       if (typeof inner === "string") {
         const innerTrim = inner.trim();
-        if (/^\[object\b/i.test(innerTrim)) return null; // lixo antigo
+        if (/^\[object\b/i.test(innerTrim)) return null;
         return normalizeItem({
           kind: "chat",
           role: "assistant",
@@ -95,15 +91,13 @@ function parseHistoryValue(raw) {
       }
       return normalizeItem(inner);
     } catch {
-      // cai no próximo passo
+      // segue
     }
   }
 
-  // 3) Tenta parsear como JSON normal
   try {
     const parsed = JSON.parse(trimmed);
 
-    // Se for string pura dentro do JSON
     if (typeof parsed === "string") {
       const innerTrim = parsed.trim();
       if (/^\[object\b/i.test(innerTrim)) return null;
@@ -117,7 +111,6 @@ function parseHistoryValue(raw) {
 
     return normalizeItem(parsed);
   } catch {
-    // 4) Fallback: texto puro não-JSON
     if (/^\[object\b/i.test(trimmed)) return null;
     return normalizeItem({
       kind: "chat",
@@ -128,22 +121,18 @@ function parseHistoryValue(raw) {
   }
 }
 
-// Resolve identidade de forma consistente com /api/chat e /api/speaking
 async function resolveUserId(req) {
   const url = new URL(req.url, `https://${req.headers.host}`);
   const uidParam = url.searchParams.get("uid");
-  const tQuery = url.searchParams.get("t");
+  const tQuery   = url.searchParams.get("t");
 
-  // 1) uid da URL (se um dia o front mandar)
   if (uidParam) return uidParam;
 
-  // 2) token t (JWT com sub)
   if (tQuery) {
     const fromT = await getUserFromToken(tQuery);
     if (fromT) return fromT;
   }
 
-  // 3) cookie LTI (Canvas)
   const cookies = parseCookies(req.headers.cookie || "");
   if (cookies["lti_user"]) return cookies["lti_user"];
 
@@ -153,7 +142,7 @@ async function resolveUserId(req) {
 export default async function handler(req, res) {
   try {
     const url = new URL(req.url, `https://${req.headers.host}`);
-    const kindFilter = url.searchParams.get("kind"); // "chat" ou "speaking" (opcional)
+    const kindFilter = url.searchParams.get("kind");
     const limitParam = url.searchParams.get("limit");
 
     let limit = Number(limitParam) || 400;
@@ -171,11 +160,9 @@ export default async function handler(req, res) {
 
     const key = historyKey(user);
 
-    // Lê TODOS os registros desse usuário
-    const rawAll = await redis.lrange(key, 0, -1); // lista de strings
+    const rawAll = await redis.lrange(key, 0, -1);
     const historyCount = rawAll?.length || 0;
 
-    // Mantém só os últimos "limit" em memória
     const raw =
       historyCount > limit ? rawAll.slice(historyCount - limit) : rawAll;
 
@@ -184,12 +171,10 @@ export default async function handler(req, res) {
         .map((str) => parseHistoryValue(str))
         .filter(Boolean) || [];
 
-    // filtro opcional por tipo
     if (kindFilter === "chat" || kindFilter === "speaking") {
       items = items.filter((it) => it.kind === kindFilter);
     }
 
-    // ordena por timestamp crescente
     items.sort((a, b) => {
       const ta = typeof a.ts === "number" ? a.ts : 0;
       const tb = typeof b.ts === "number" ? b.ts : 0;
