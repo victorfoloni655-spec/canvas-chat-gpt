@@ -190,7 +190,7 @@ export default async function handler(req, res) {
     // Salva histórico (não bloqueia a resposta se der erro)
     await appendHistory(counterId, userTextForHistory, reply);
 
-    // 🔎 DEBUG: lê quantos itens existem no histórico desse usuário
+    // DEBUG opcional: quantos itens tem no histórico
     let historyDebugCount = 0;
     try {
       const histKey = historyKey(counterId);
@@ -205,7 +205,8 @@ export default async function handler(req, res) {
       reply,
       used,
       limit: MONTHLY_LIMIT,
-      historyDebugCount, // campo extra só pra debug
+      historyDebugCount,
+      userId: counterId, // <- ESSENCIAL: manda o id que estamos usando
     });
   } catch (e) {
     console.error("CHAT error:", e);
