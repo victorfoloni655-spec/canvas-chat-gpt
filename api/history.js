@@ -9,12 +9,13 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// AGORA usa "history2" por padrão
-const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history2";
+const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
 
 function parseCookies(h = "") {
   return Object.fromEntries(
-    (h || "").split(";").map((s) => s.trim().split("="))
+    (h || "")
+      .split(";")
+      .map((s) => s.trim().split("="))
   );
 }
 
@@ -32,107 +33,29 @@ function historyKey(userId) {
   return `${HISTORY_PREFIX}:${userId}`;
 }
 
-function normalizeItem(src) {
-  if (!src || typeof src !== "object") return null;
-
-  const out = { ...src };
-
-  if (!out.kind) out.kind = "chat";
-  if (!out.role) out.role = "assistant";
-
-  if (typeof out.content !== "string") {
-    if (out.content == null) {
-      out.content = "";
-    } else {
-      try {
-        out.content = JSON.stringify(out.content);
-      } catch {
-        out.content = String(out.content);
-      }
-    }
-  }
-
-  if (typeof out.ts !== "number") {
-    if (typeof out.timestamp === "number") {
-      out.ts = out.timestamp;
-    } else {
-      out.ts = 0;
-    }
-  }
-
-  return out;
+// Garante que itens antigos (sem "kind") sejam tratados como chat
+function normalizeItem(item) {
+  if (!item) return null;
+  if (!item.kind) return { ...item, kind: "chat" };
+  return item;
 }
 
-function parseHistoryValue(raw) {
-  if (raw == null) return null;
-
-  let s = typeof raw === "string" ? raw : String(raw);
-  let trimmed = s.trim();
-
-  if (/^\[object\b/i.test(trimmed)) {
-    return null;
-  }
-
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    try {
-      const inner = JSON.parse(trimmed);
-      if (typeof inner === "string") {
-        const innerTrim = inner.trim();
-        if (/^\[object\b/i.test(innerTrim)) return null;
-        return normalizeItem({
-          kind: "chat",
-          role: "assistant",
-          content: innerTrim,
-          ts: 0,
-        });
-      }
-      return normalizeItem(inner);
-    } catch {
-      // segue
-    }
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed);
-
-    if (typeof parsed === "string") {
-      const innerTrim = parsed.trim();
-      if (/^\[object\b/i.test(innerTrim)) return null;
-      return normalizeItem({
-        kind: "chat",
-        role: "assistant",
-        content: innerTrim,
-        ts: 0,
-      });
-    }
-
-    return normalizeItem(parsed);
-  } catch {
-    if (/^\[object\b/i.test(trimmed)) return null;
-    return normalizeItem({
-      kind: "chat",
-      role: "assistant",
-      content: trimmed,
-      ts: 0,
-    });
-  }
-}
-
+// Resolve identidade de forma consistente com /api/chat e /api/speaking
 async function resolveUserId(req) {
   const url = new URL(req.url, `https://${req.headers.host}`);
   const uidParam = url.searchParams.get("uid");
   const tQuery   = url.searchParams.get("t");
 
+  // 1) uid da URL (?uid=xxx) – o front sempre manda
   if (uidParam) return uidParam;
 
+  // 2) token t (se existir)
   if (tQuery) {
     const fromT = await getUserFromToken(tQuery);
     if (fromT) return fromT;
   }
 
+  // 3) cookie LTI (Canvas)
   const cookies = parseCookies(req.headers.cookie || "");
   if (cookies["lti_user"]) return cookies["lti_user"];
 
@@ -142,12 +65,7 @@ async function resolveUserId(req) {
 export default async function handler(req, res) {
   try {
     const url = new URL(req.url, `https://${req.headers.host}`);
-    const kindFilter = url.searchParams.get("kind");
-    const limitParam = url.searchParams.get("limit");
-
-    let limit = Number(limitParam) || 400;
-    if (limit < 10) limit = 10;
-    if (limit > 1000) limit = 1000;
+    const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
 
     const user = await resolveUserId(req);
 
@@ -160,37 +78,44 @@ export default async function handler(req, res) {
 
     const key = historyKey(user);
 
-    const rawAll = await redis.lrange(key, 0, -1);
-    const historyCount = rawAll?.length || 0;
-
-    const raw =
-      historyCount > limit ? rawAll.slice(historyCount - limit) : rawAll;
+    // ⚠️ IMPORTANTE: pega TUDO (0, -1)
+    // O tamanho já está limitado pelo LTRIM em /api/chat e /api/speaking
+    const raw = await redis.lrange(key, 0, -1); // lista de strings JSON
 
     let items =
       (raw || [])
-        .map((str) => parseHistoryValue(str))
+        .map((str) => {
+          try {
+            return JSON.parse(str);
+          } catch {
+            return null;
+          }
+        })
+        .map(normalizeItem)
         .filter(Boolean) || [];
 
+    // filtro opcional por tipo
     if (kindFilter === "chat" || kindFilter === "speaking") {
       items = items.filter((it) => it.kind === kindFilter);
     }
 
+    // ordena por timestamp crescente
     items.sort((a, b) => {
       const ta = typeof a.ts === "number" ? a.ts : 0;
       const tb = typeof b.ts === "number" ? b.ts : 0;
       return ta - tb;
     });
 
+    // historyCount só pra debug
     return res.status(200).json({
       items,
       userId: user,
-      historyCount,
+      historyCount: raw ? raw.length : 0,
+      key,
     });
   } catch (e) {
     console.error("HISTORY error:", e);
-    return res
-      .status(500)
-      .json({ error: e?.message || "history error" });
+    return res.status(500).json({ error: e?.message || "history error" });
   }
 }
 
