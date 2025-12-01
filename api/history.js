@@ -45,7 +45,7 @@ function normalizeItem(item) {
 
 export default async function handler(req, res) {
   try {
-    // Identidade: token 't' (mobile) ou cookie lti_user (desktop)
+    // pega query params
     const url = new URL(req.url, `https://${req.headers.host}`);
     const t = url.searchParams.get("t");
     const kindFilter = url.searchParams.get("kind"); // opcional: "chat" ou "speaking"
@@ -56,13 +56,13 @@ export default async function handler(req, res) {
     if (limit < 10) limit = 10;
     if (limit > 1000) limit = 1000;
 
-    let user = null;
-    if (t) {
+    // 👇 AGORA: mesmo padrão do /api/chat e /api/speaking
+    const cookies = parseCookies(req.headers.cookie || "");
+    let user = cookies["lti_user"] || null;   // 1º tenta cookie
+
+    // se não tiver cookie (ex: mobile), tenta token t
+    if (!user && t) {
       user = await getUserFromToken(t);
-    }
-    if (!user) {
-      const cookies = parseCookies(req.headers.cookie || "");
-      user = cookies["lti_user"] || null;
     }
 
     if (!user) {
