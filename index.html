@@ -771,18 +771,27 @@ async function atualizarQuotaChat(){
 /* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
+    // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
       badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
   } else {
+    // Modo SPEAKING → mostra minutos + segundos
     if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
       const used  = speakingQuota.usedSeconds || 0;
       const limit = speakingQuota.limitSeconds;
-      const remainingMin = Math.max(0, (limit - used) / 60);
-      const limitMin     = limit / 60;
-      badge.textContent = `restante ${remainingMin.toFixed(1)} / ${limitMin.toFixed(1)} min`;
+
+      const remainingSec = Math.max(0, limit - used);
+      const limitSec     = limit;
+
+      const rMin = Math.floor(remainingSec / 60);
+      const rSec = remainingSec % 60;
+
+      const lMin = Math.floor(limitSec / 60);
+
+      badge.textContent = `restante ${rMin}m ${String(rSec).padStart(2,'0')}s / ${lMin}m`;
     } else {
       badge.textContent = 'restante -- / -- min';
     }
