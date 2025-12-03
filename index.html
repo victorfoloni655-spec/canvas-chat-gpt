@@ -783,7 +783,7 @@ function updateBadge() {
   if (currentMode === 'chat') {
     // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
-      badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
+      badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
