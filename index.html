@@ -201,6 +201,12 @@
     font-weight: 500;
   }
 
+  .btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border-color: transparent;
+}
+
   .btn-recording {
     background: #ef4444;
     color: #fff;
@@ -368,7 +374,7 @@
 
           <div class="speak-controls">
             <button id="record-btn">🎙️ Gravar</button>
-            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar gravação</button>
+            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar</button>
             <span id="record-timer">00:00</span>
           </div>
 
@@ -793,7 +799,7 @@ function updateBadge() {
 
       badge.textContent = `restante ${rMin}m ${String(rSec).padStart(2,'0')}s / ${lMin}m`;
     } else {
-      badge.textContent = 'restante -- / -- min';
+      badge.textContent = 'Restante -- / -- min';
     }
   }
 }
@@ -915,9 +921,14 @@ let recordTimerId = null;
 function resetRecordingUI(){
   isRecording = false;
   recordBtn.disabled = false;
-  recordBtn.textContent = '🎙️ Gravar';
-  recordBtn.classList.remove('btn-recording');
+  recordBtn.textContent = '🎙️ Gravar';       // volta pro texto original
+  recordBtn.classList.remove('btn-recording'); // só por garantia, mesmo sem usar
+
+  // volta o cancelar pro estilo "secundário" e desabilitado
   cancelRecordBtn.disabled = true;
+  cancelRecordBtn.classList.remove('btn-danger');
+  cancelRecordBtn.classList.add('btn-secondary');
+
   if (recordTimerId) {
     clearInterval(recordTimerId);
     recordTimerId = null;
@@ -938,10 +949,17 @@ async function startRecording(){
     isRecording = true;
     isCancelling = false;
     recordStart = Date.now();
+
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-    recordBtn.textContent = "Parar e enviar";
-    recordBtn.classList.add('btn-recording');
+
+    // 🔹 Botão principal: continua na cor padrão (tiffany) e vira "Enviar"
+    recordBtn.textContent = "Enviar";
+    recordBtn.classList.remove('btn-recording'); // garante que não fique vermelho
+
+    // 🔹 Botão cancelar: fica vermelho e habilitado
     cancelRecordBtn.disabled = false;
+    cancelRecordBtn.classList.remove('btn-secondary');
+    cancelRecordBtn.classList.add('btn-danger');
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
