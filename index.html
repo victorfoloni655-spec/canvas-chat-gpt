@@ -319,6 +319,10 @@
     line-height: 1.0;
     font-weight: 600;
   }
+  
+.speak-controls #record-btn {
+    padding: 14px 26px;     /* aumenta o "corpo" do botão */
+ }
 
   @media (max-width: 600px) {
     .wrap { padding: 8px; }
@@ -779,7 +783,7 @@ function updateBadge() {
   if (currentMode === 'chat') {
     // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
-      badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
+      badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
