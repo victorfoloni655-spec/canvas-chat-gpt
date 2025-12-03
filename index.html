@@ -122,7 +122,7 @@
   }
 
   #speak-section {
-    display:none;
+    display: none; /* começa oculto */
   }
 
   .chat {
@@ -201,15 +201,24 @@
     font-weight: 500;
   }
 
-  .btn-danger {
-  background: #ef4444;
-  color: #fff;
-  border-color: transparent;
-}
-
-  .btn-recording {
+  /* Botão cancelar vermelho */
+  .btn-cancel {
     background: #ef4444;
     color: #fff;
+    border: 1px solid #b91c1c;
+  }
+
+  .btn-cancel:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+  }
+
+  /* Botão principal do speaking maior */
+  #record-btn {
+    min-width: 150px;
+    padding: 14px 22px;
+    font-size: 16px;
+    font-weight: 700;
   }
 
   /* CTAs de upgrade (chat + speaking) */
@@ -258,7 +267,7 @@
   .speak-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
     flex-shrink: 0;
   }
@@ -301,6 +310,7 @@
     color: var(--text);
   }
 
+  /* tokens certo/errado */
   .speak-bad-token {
     background: #fecaca;
     color: #450a0a;
@@ -320,10 +330,7 @@
     font-weight: 600;
   }
 
- .speak-controls #record-btn {
-    min-width: 180px;       /* garante que ele fique larguinho */
-}
-
+  /* Mobile */
   @media (max-width: 600px) {
     .wrap { padding: 8px; }
     .header { padding: 10px 12px; }
@@ -360,7 +367,7 @@
         <button id="tab-speak" class="mode-btn">Pronunciation training</button>
       </div>
 
-      <!-- TELA DE CHAT -->
+      <!-- TELA DE CHAT (apenas texto) -->
       <div id="chat-section">
         <div id="chat" class="chat"></div>
         <div class="chat-footer">
@@ -369,7 +376,7 @@
         </div>
       </div>
 
-      <!-- TELA DE PRONÚNCIA -->
+      <!-- TELA DE PRONÚNCIA (apenas voz) -->
       <div id="speak-section">
         <div class="speak-box">
           <p class="speak-helper">
@@ -377,8 +384,8 @@
           </p>
 
           <div class="speak-controls">
-            <button id="record-btn">🎙️ Gravar</button>
-            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar</button>
+            <button id="record-btn">Enviar</button>
+            <button id="cancel-record-btn" class="btn-cancel" disabled>Cancelar</button>
             <span id="record-timer">00:00</span>
           </div>
 
@@ -395,7 +402,6 @@ const CHAT_URL    = '/api/chat';
 const QUOTA_URL   = '/api/quota';
 const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
-const LOCAL_UID_KEY           = 'ia_english_uid_v1';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -427,28 +433,6 @@ function captureTokenFromURL(){
 }
 function getToken(){
   return localStorage.getItem('lti_token') || captureTokenFromURL() || null;
-}
-
-/* ---------- UID LOCAL (multi-dispositivo) ---------- */
-function getOrCreateLocalUid() {
-  try {
-    let uid = localStorage.getItem(LOCAL_UID_KEY);
-    if (!uid) {
-      if (window.crypto && crypto.randomUUID) {
-        uid = crypto.randomUUID();
-      } else {
-        uid = 'u-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      }
-      localStorage.setItem(LOCAL_UID_KEY, uid);
-    }
-    return uid;
-  } catch (e) {
-    console.error('Erro ao acessar localStorage para UID:', e);
-    if (!window.__ia_uid_fallback) {
-      window.__ia_uid_fallback = 'u-' + Math.random().toString(36).slice(2);
-    }
-    return window.__ia_uid_fallback;
-  }
 }
 
 /* ---------- ESTADO ---------- */
@@ -524,7 +508,7 @@ function addSpeakCTAPackages(packages){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* ---------- HISTÓRICO CHAT (localStorage) ---------- */
+/* ---------- HISTÓRICO CHAT (localStorage — fallback) ---------- */
 function saveLocalHistory(role, content) {
   try {
     const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
@@ -562,7 +546,7 @@ function loadLocalHistory() {
   }
 }
 
-/* ---------- HISTÓRICO SPEAKING (localStorage) ---------- */
+/* ---------- HISTÓRICO SPEAKING (localStorage – fallback opcional) ---------- */
 function saveSpeakHistory(entry) {
   try {
     const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
@@ -707,7 +691,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam */
+/* Versões que renderizam + salvam (para uso em tempo real) */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -728,31 +712,6 @@ function appendAIAudioMessage(data){
     audioBase64: audioBase64 || null,
     ts: Date.now()
   });
-}
-
-function loadSpeakHistory() {
-  try {
-    const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return;
-
-    arr.forEach(item => {
-      if (!item || !item.role) return;
-      if (item.role === 'user' && item.audioBase64) {
-        renderStudentAudioMessage(item.audioBase64);
-      } else if (item.role === 'assistant') {
-        renderAIAudioMessage({
-          transcript: item.transcript,
-          correct_sentence: item.correct_sentence,
-          feedback_text: item.feedback_text,
-          audioBase64: item.audioBase64
-        });
-      }
-    });
-  } catch (e) {
-    console.error('Erro ao carregar histórico speaking:', e);
-  }
 }
 
 /* ---------- QUOTA CHAT ---------- */
@@ -778,63 +737,71 @@ async function atualizarQuotaChat(){
   }
 }
 
+/* ---------- QUOTA SPEAKING (busca inicial em /api/speaking-quota) ---------- */
+async function loadSpeakingQuotaOnStart() {
+  try {
+    const t = getToken();
+    let url = '/api/speaking-quota';
+    if (t) {
+      const params = new URLSearchParams({ t });
+      url += '?' + params.toString();
+    }
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      // se não existir o endpoint ou não tiver uso ainda, só não quebra
+      console.warn('speaking-quota não disponível:', res.status);
+      return;
+    }
+    const j = await res.json().catch(() => ({}));
+    if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
+      speakingQuota = {
+        usedSeconds: j.usedSeconds,
+        limitSeconds: j.limitSeconds
+      };
+      updateBadge();
+    }
+  } catch (err) {
+    console.error('Erro ao buscar quota speaking:', err);
+  }
+}
+
 /* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
-    // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
       badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
   } else {
-    // Modo SPEAKING → mostra minutos + segundos
     if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
       const used  = speakingQuota.usedSeconds || 0;
       const limit = speakingQuota.limitSeconds;
-
-      const remainingSec = Math.max(0, limit - used);
-      const limitSec     = limit;
-
-      const rMin = Math.floor(remainingSec / 60);
-      const rSec = remainingSec % 60;
-
-      const lMin = Math.floor(limitSec / 60);
-
-      badge.textContent = `restante ${rMin}m ${String(rSec).padStart(2,'0')}s / ${lMin}m`;
+      const remainingMin = Math.max(0, (limit - used) / 60);
+      const limitMin     = limit / 60;
+      badge.textContent = `restante ${remainingMin.toFixed(1)} / ${limitMin.toFixed(1)} min`;
     } else {
       badge.textContent = 'Restante -- / -- min';
     }
   }
 }
 
-/* ---------- TROCA DE TELA ---------- */
+/* ---------- TROCA DE TELA (CHAT x PRONUNCIATION) ---------- */
 function setMode(mode) {
   currentMode = mode;
-
   if (mode === 'chat') {
     tabChat.classList.add('active');
     tabSpeak.classList.remove('active');
     chatSection.style.display  = 'flex';
     speakSection.style.display = 'none';
-
-    // garante que o chat abra sempre no final
-    setTimeout(() => {
-      chat.scrollTop = chat.scrollHeight;
-    }, 50);
   } else {
     tabChat.classList.remove('active');
     tabSpeak.classList.add('active');
     chatSection.style.display  = 'none';
     speakSection.style.display = 'flex';
-
-    // 👇 aqui é o que você pediu:
-    // sempre que abrir a aba de Pronunciation, rola pro último áudio
-    setTimeout(() => {
-      speakConversation.scrollTop = speakConversation.scrollHeight;
-    }, 50);
+    // garante que sempre mostra o último áudio
+    speakConversation.scrollTop = speakConversation.scrollHeight;
   }
-
   updateBadge();
 }
 
@@ -850,9 +817,8 @@ async function send(){
   messages.push({ role: "user", content: text });
 
   try {
-    const t   = getToken();
-    const uid = getOrCreateLocalUid();
-    const body = { messages, uid };
+    const t = getToken();
+    const body = { messages };
     if (t) body.t = t;
 
     const res = await fetch(CHAT_URL, {
@@ -925,14 +891,9 @@ let recordTimerId = null;
 function resetRecordingUI(){
   isRecording = false;
   recordBtn.disabled = false;
-  recordBtn.textContent = '🎙️ Gravar';       // volta pro texto original
-  recordBtn.classList.remove('btn-recording'); // só por garantia, mesmo sem usar
-
-  // volta o cancelar pro estilo "secundário" e desabilitado
+  recordBtn.textContent = 'Enviar';
+  recordBtn.classList.remove('btn-recording');
   cancelRecordBtn.disabled = true;
-  cancelRecordBtn.classList.remove('btn-danger');
-  cancelRecordBtn.classList.add('btn-secondary');
-
   if (recordTimerId) {
     clearInterval(recordTimerId);
     recordTimerId = null;
@@ -953,17 +914,10 @@ async function startRecording(){
     isRecording = true;
     isCancelling = false;
     recordStart = Date.now();
-
-    speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-
-    // 🔹 Botão principal: continua na cor padrão (tiffany) e vira "Enviar"
-    recordBtn.textContent = "Enviar";
-    recordBtn.classList.remove('btn-recording'); // garante que não fique vermelho
-
-    // 🔹 Botão cancelar: fica vermelho e habilitado
+    speakStatus.textContent = "Gravando... clique em Parar para enviar.";
+    recordBtn.textContent = "Parar";
+    recordBtn.classList.add('btn-recording');
     cancelRecordBtn.disabled = false;
-    cancelRecordBtn.classList.remove('btn-secondary');
-    cancelRecordBtn.classList.add('btn-danger');
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
@@ -1053,9 +1007,8 @@ function showSpeakingResult(data){
 
 async function sendSpeakingAudio(base64, durationMs){
   try {
-    const t   = getToken();
-    const uid = getOrCreateLocalUid();
-    const body = { audio: base64, durationMs, uid };
+    const t = getToken();
+    const body = { audio: base64, durationMs };
     if (t) body.t = t;
 
     const res = await fetch('/api/speaking', {
@@ -1094,6 +1047,61 @@ async function sendSpeakingAudio(base64, durationMs){
   }
 }
 
+/* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
+async function loadRemoteHistory() {
+  try {
+    const t = getToken();
+    const url = t
+      ? `/api/history?t=${encodeURIComponent(t)}`
+      : '/api/history';
+
+    const res = await fetch(url, { credentials: 'include' });
+
+    if (!res.ok) {
+      console.error('Erro ao carregar histórico remoto:', res.status);
+      // fallback: histórico local simples (chat)
+      loadLocalHistory();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+    items.forEach(item => {
+      if (!item) return;
+
+      // SPEAKING
+      if (item.kind === 'speaking') {
+        if (item.role === 'user' && item.audioBase64) {
+          renderStudentAudioMessage(item.audioBase64);
+        } else if (item.role === 'assistant') {
+          renderAIAudioMessage({
+            transcript: item.transcript || '',
+            correct_sentence: item.correct_sentence || '',
+            feedback_text: item.feedback_text || '',
+            audioBase64: item.audioBase64 || null
+          });
+        }
+        return;
+      }
+
+      // CHAT (inclui antigos sem kind)
+      if (typeof item.content !== 'string') return;
+
+      const who = item.role === 'user' ? 'user' : 'bot';
+      addMsg(item.content, who);
+
+      const role = who === 'user' ? 'user' : 'assistant';
+      messages.push({ role, content: item.content });
+    });
+  } catch (err) {
+    console.error('Erro ao buscar histórico remoto:', err);
+    loadLocalHistory();
+  }
+}
+
 /* ---------- EVENTOS ---------- */
 btn.addEventListener('click', send);
 input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
@@ -1110,85 +1118,12 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
-// ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
-async function loadRemoteHistory() {
-  try {
-    const t = getToken();
-
-    const params = new URLSearchParams();
-    if (t) params.set("t", t);
-    // param extra só pra garantir que o browser não cache
-    params.set("_", Date.now().toString());
-
-    const url = `/api/history?${params.toString()}`;
-
-    const res = await fetch(url, { credentials: "include" });
-    
-    if (!res.ok) {
-      console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: usa o que já tiver salvo localmente
-      loadLocalHistory();
-      loadSpeakHistory();
-      return;
-    }
-
-    const data = await res.json().catch(() => ({}));
-    const items = Array.isArray(data.items) ? data.items : [];
-
-    // se não tiver nada no Redis, volta pro localStorage
-    if (!items.length) {
-      console.log("Histórico remoto vazio; usando fallback localStorage.");
-      loadLocalHistory();
-      loadSpeakHistory();
-      return;
-    }
-
-    // garante ordem cronológica
-    items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-
-    items.forEach((item) => {
-      if (!item) return;
-
-      // 1) SPEAKING (kind === "speaking")
-      if (item.kind === "speaking") {
-        if (item.role === "user" && item.audioBase64) {
-          // áudio enviado pelo aluno
-          renderStudentAudioMessage(item.audioBase64);
-        } else if (item.role === "assistant") {
-          // resposta da IA com TTS + feedback
-          renderAIAudioMessage({
-            transcript: item.transcript || "",
-            correct_sentence: item.correct_sentence || "",
-            feedback_text: item.feedback_text || "",
-            audioBase64: item.audioBase64 || null,
-          });
-        }
-        return; // não deixa cair na parte de chat
-      }
-
-      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
-      if (typeof item.content !== "string") return;
-
-      const who = item.role === "user" ? "user" : "bot";
-      addMsg(item.content, who);
-
-      // alimenta o array messages pra manter o contexto da conversa
-      const role = who === "user" ? "user" : "assistant";
-      messages.push({ role, content: item.content });
-    });
-  } catch (err) {
-    console.error("Erro ao buscar histórico remoto:", err);
-    // fallback local se der erro na rede
-    loadLocalHistory();
-    loadSpeakHistory();
-  }
-}
-
 /* ---------- INIT ---------- */
 captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
 loadRemoteHistory();
+loadSpeakingQuotaOnStart();
 </script>
 </body>
 </html>
