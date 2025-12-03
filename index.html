@@ -320,29 +320,13 @@
     font-weight: 600;
   }
 
- .speak-controls #record-btn {
-  font-size: 18px;        /* aumenta o tamanho da fonte */
-  padding: 14px 26px;     /* aumenta o "corpo" do botão */
-  min-width: 180px;       /* garante que ele fique larguinho */
-}
-
-@media (max-width: 600px) {
-  .speak-controls {
-    flex-direction: row;
-    gap: 6px;
-  }
-
-  .speak-controls #record-btn {
-    flex: 1;
-    font-size: 17px;
-    padding: 14px 20px;
-  }
-
-  .speak-controls #cancel-record-btn {
-    font-size: 14px;
-    padding: 10px 12px;
-  }
-}
+  @media (max-width: 600px) {
+    .wrap { padding: 8px; }
+    .header { padding: 10px 12px; }
+    .chat-footer {
+      padding: 10px 10px 12px;
+      gap: 6px;
+    }
     input {
       padding: 10px 8px;
       font-size: 15px;
