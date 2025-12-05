@@ -201,12 +201,6 @@
     font-weight: 500;
   }
 
-  .btn-danger {
-    background: #ef4444;
-    color: #fff;
-    border-color: transparent;
-  }
-
   .btn-recording {
     background: #ef4444;
     color: #fff;
@@ -319,10 +313,6 @@
     line-height: 1.0;
     font-weight: 600;
   }
- 
-  .speak-controls #record-btn {
-    min-width: 120px;       /* garante que ele fique larguinho */
-  }
 
   @media (max-width: 600px) {
     .wrap { padding: 8px; }
@@ -373,12 +363,12 @@
       <div id="speak-section">
         <div class="speak-box">
           <p class="speak-helper">
-            Grave uma frase em inglês para treinar sua pronúncia. Você receberá feedback escrito e um áudio com correção.
+            Grave uma frase em inglês para treinar sua pronúncia. Você receberá a frase modelo, feedback escrito e um áudio curto com correção.
           </p>
 
           <div class="speak-controls">
             <button id="record-btn">🎙️ Gravar</button>
-            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar</button>
+            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar gravação</button>
             <span id="record-timer">00:00</span>
           </div>
 
@@ -396,7 +386,6 @@ const QUOTA_URL   = '/api/quota';
 const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
 const LOCAL_UID_KEY           = 'ia_english_uid_v1';
-const LOCAL_SPEAK_AUDIO_BY_ID_KEY = 'ia_english_speaking_audio_by_id_v1';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -580,43 +569,6 @@ function saveSpeakHistory(entry) {
   } catch (e) {
     console.error('Erro ao salvar histórico speaking:', e);
   }
-}
-
-/* ---------- ÁUDIOS SPEAKING POR ID (localStorage por dispositivo) ---------- */
-function saveSpeakingAudioById(id, userAudioBase64, ttsAudioBase64) {
-  if (!id) return;
-  try {
-    const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
-    let map = {};
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        map = parsed;
-      }
-    }
-
-    const existing = map[id] || {};
-    map[id] = {
-      user: userAudioBase64 || existing.user || null,
-      tts:  ttsAudioBase64  || existing.tts  || null,
-    };
-
-    localStorage.setItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error('Erro ao salvar áudio speaking por id:', e);
-  }
-}
-
-function loadSpeakingAudioByIdMap() {
-  try {
-    const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed;
-  } catch (e) {
-    console.error('Erro ao carregar áudio speaking por id:', e);
-  }
-  return {};
 }
 
 /* Renderização pura (sem salvar) */
@@ -816,60 +768,23 @@ async function atualizarQuotaChat(){
   }
 }
 
-/* ---------- QUOTA SPEAKING (carregar ao iniciar) ---------- */
-async function loadSpeakingQuotaOnStart() {
-  try {
-    const t = getToken();
-    const url = t
-      ? `/api/speaking-quota?t=${encodeURIComponent(t)}`
-      : '/api/speaking-quota';
-
-    const res = await fetch(url, { credentials: 'include' });
-
-    if (!res.ok) {
-      console.warn('speaking-quota não disponível:', res.status);
-      return;
-    }
-
-    const j = await res.json().catch(() => ({}));
-    if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
-      speakingQuota = {
-        usedSeconds: j.usedSeconds,
-        limitSeconds: j.limitSeconds
-      };
-      updateBadge();
-    }
-  } catch (e) {
-    console.error('Erro ao buscar quota speaking:', e);
-  }
-}
-
 /* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
-    // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
-      badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
+      badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
   } else {
-    // Modo SPEAKING → mostra minutos + segundos
     if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
       const used  = speakingQuota.usedSeconds || 0;
       const limit = speakingQuota.limitSeconds;
-
-      const remainingSec = Math.max(0, limit - used);
-      const limitSec     = limit;
-
-      const rMin = Math.floor(remainingSec / 60);
-      const rSec = remainingSec % 60;
-
-      const lMin = Math.floor(limitSec / 60);
-
-      badge.textContent = `restante ${rMin}m ${String(rSec).padStart(2,'0')}s / ${lMin}m`;
+      const remainingMin = Math.max(0, (limit - used) / 60);
+      const limitMin     = limit / 60;
+      badge.textContent = `restante ${remainingMin.toFixed(1)} / ${limitMin.toFixed(1)} min`;
     } else {
-      badge.textContent = 'Restante -- / -- min';
+      badge.textContent = 'restante -- / -- min';
     }
   }
 }
@@ -877,29 +792,17 @@ function updateBadge() {
 /* ---------- TROCA DE TELA ---------- */
 function setMode(mode) {
   currentMode = mode;
-
   if (mode === 'chat') {
     tabChat.classList.add('active');
     tabSpeak.classList.remove('active');
     chatSection.style.display  = 'flex';
     speakSection.style.display = 'none';
-
-    // garante que o chat abra sempre no final
-    setTimeout(() => {
-      chat.scrollTop = chat.scrollHeight;
-    }, 50);
   } else {
     tabChat.classList.remove('active');
     tabSpeak.classList.add('active');
     chatSection.style.display  = 'none';
     speakSection.style.display = 'flex';
-
-    // sempre que abrir a aba de Pronunciation, rola pro último áudio
-    setTimeout(() => {
-      speakConversation.scrollTop = speakConversation.scrollHeight;
-    }, 50);
   }
-
   updateBadge();
 }
 
@@ -990,14 +893,9 @@ let recordTimerId = null;
 function resetRecordingUI(){
   isRecording = false;
   recordBtn.disabled = false;
-  recordBtn.textContent = '🎙️ Gravar';       // volta pro texto original
-  recordBtn.classList.remove('btn-recording'); // só por garantia
-
-  // volta o cancelar pro estilo "secundário" e desabilitado
+  recordBtn.textContent = '🎙️ Gravar';
+  recordBtn.classList.remove('btn-recording');
   cancelRecordBtn.disabled = true;
-  cancelRecordBtn.classList.remove('btn-danger');
-  cancelRecordBtn.classList.add('btn-secondary');
-
   if (recordTimerId) {
     clearInterval(recordTimerId);
     recordTimerId = null;
@@ -1018,17 +916,10 @@ async function startRecording(){
     isRecording = true;
     isCancelling = false;
     recordStart = Date.now();
-
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-
-    // Botão principal: tiffany e vira "Enviar"
-    recordBtn.textContent = "Enviar";
-    recordBtn.classList.remove('btn-recording');
-
-    // Botão cancelar: vermelho
+    recordBtn.textContent = "Parar e enviar";
+    recordBtn.classList.add('btn-recording');
     cancelRecordBtn.disabled = false;
-    cancelRecordBtn.classList.remove('btn-secondary');
-    cancelRecordBtn.classList.add('btn-danger');
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
@@ -1151,84 +1042,11 @@ async function sendSpeakingAudio(base64, durationMs){
     }
 
     const data = await res.json();
-
-    // salva áudios desta tentativa por ID neste dispositivo
-    if (data && data.id) {
-      try {
-        saveSpeakingAudioById(data.id, base64, data.audioBase64 || null);
-      } catch (e) {
-        console.error("Erro ao salvar áudios speaking por id:", e);
-      }
-    }
-
     showSpeakingResult(data);
     speakStatus.textContent = "Correção recebida.";
   } catch (err) {
     console.error("Erro rede /api/speaking", err);
     speakStatus.textContent = "Erro de rede ao enviar o áudio para correção.";
-  }
-}
-
-/* ---------- HISTÓRICO REMOTO (chat via /api/history) ---------- */
-async function loadRemoteHistory() {
-  try {
-    const t = getToken();
-
-    const params = new URLSearchParams();
-    if (t) params.set("t", t);
-    // param extra só pra garantir que o browser não cache
-    params.set("_", Date.now().toString());
-
-    const url = `/api/history?${params.toString()}`;
-
-    const res = await fetch(url, { credentials: "include" });
-
-    if (!res.ok) {
-      console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback totalmente local
-      loadLocalHistory();   // chat local
-      loadSpeakHistory();   // speaking local (áudio + feedback)
-      return;
-    }
-
-    const data = await res.json().catch(() => ({}));
-    const items = Array.isArray(data.items) ? data.items : [];
-
-    if (!items.length) {
-      console.log("Histórico remoto vazio; usando fallback localStorage.");
-      loadLocalHistory();
-      loadSpeakHistory();
-      return;
-    }
-
-    // garante ordem cronológica
-    items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-
-    items.forEach((item) => {
-      if (!item) return;
-
-      // ❌ NÃO renderizamos speaking a partir do Redis
-      // (áudios e feedbacks vão vir só do localStorage)
-      if (item.kind === "speaking") return;
-
-      // CHAT normal
-      if (typeof item.content !== "string") return;
-
-      const who = item.role === "user" ? "user" : "bot";
-      addMsg(item.content, who);
-
-      // Alimenta o array messages pra manter o contexto da conversa
-      const role = who === "user" ? "user" : "assistant";
-      messages.push({ role, content: item.content });
-    });
-
-    // Depois de carregar o chat remoto, renderiza o histórico de speaking local
-    loadSpeakHistory();
-  } catch (err) {
-    console.error("Erro ao buscar histórico remoto:", err);
-    // fallback totalmente local
-    loadLocalHistory();
-    loadSpeakHistory();
   }
 }
 
@@ -1248,12 +1066,85 @@ cancelRecordBtn.addEventListener('click', () => {
   if (isRecording) stopRecording(false);
 });
 
+// ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
+async function loadRemoteHistory() {
+  try {
+    const t = getToken();
+
+    const params = new URLSearchParams();
+    if (t) params.set("t", t);
+    // param extra só pra garantir que o browser não cache
+    params.set("_", Date.now().toString());
+
+    const url = `/api/history?${params.toString()}`;
+
+    const res = await fetch(url, { credentials: "include" });
+    
+    if (!res.ok) {
+      console.error("Erro ao carregar histórico remoto:", res.status);
+      // fallback: usa o que já tiver salvo localmente
+      loadLocalHistory();
+      loadSpeakHistory();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    // se não tiver nada no Redis, volta pro localStorage
+    if (!items.length) {
+      console.log("Histórico remoto vazio; usando fallback localStorage.");
+      loadLocalHistory();
+      loadSpeakHistory();
+      return;
+    }
+
+    // garante ordem cronológica
+    items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+    items.forEach((item) => {
+      if (!item) return;
+
+      // 1) SPEAKING (kind === "speaking")
+      if (item.kind === "speaking") {
+        if (item.role === "user" && item.audioBase64) {
+          // áudio enviado pelo aluno
+          renderStudentAudioMessage(item.audioBase64);
+        } else if (item.role === "assistant") {
+          // resposta da IA com TTS + feedback
+          renderAIAudioMessage({
+            transcript: item.transcript || "",
+            correct_sentence: item.correct_sentence || "",
+            feedback_text: item.feedback_text || "",
+            audioBase64: item.audioBase64 || null,
+          });
+        }
+        return; // não deixa cair na parte de chat
+      }
+
+      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
+      if (typeof item.content !== "string") return;
+
+      const who = item.role === "user" ? "user" : "bot";
+      addMsg(item.content, who);
+
+      // alimenta o array messages pra manter o contexto da conversa
+      const role = who === "user" ? "user" : "assistant";
+      messages.push({ role, content: item.content });
+    });
+  } catch (err) {
+    console.error("Erro ao buscar histórico remoto:", err);
+    // fallback local se der erro na rede
+    loadLocalHistory();
+    loadSpeakHistory();
+  }
+}
+
 /* ---------- INIT ---------- */
 captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
 loadRemoteHistory();
-loadSpeakingQuotaOnStart();
 </script>
 </body>
 </html>
