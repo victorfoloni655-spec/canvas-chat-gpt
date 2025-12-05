@@ -396,6 +396,7 @@ const QUOTA_URL   = '/api/quota';
 const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
 const LOCAL_UID_KEY           = 'ia_english_uid_v1';
+const LOCAL_SPEAK_AUDIO_BY_ID_KEY = 'ia_english_speaking_audio_by_id_v1';
 
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
@@ -579,6 +580,43 @@ function saveSpeakHistory(entry) {
   } catch (e) {
     console.error('Erro ao salvar histórico speaking:', e);
   }
+}
+
+/* ---------- ÁUDIOS SPEAKING POR ID (localStorage por dispositivo) ---------- */
+function saveSpeakingAudioById(id, userAudioBase64, ttsAudioBase64) {
+  if (!id) return;
+  try {
+    const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
+    let map = {};
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        map = parsed;
+      }
+    }
+
+    const existing = map[id] || {};
+    map[id] = {
+      user: userAudioBase64 || existing.user || null,
+      tts:  ttsAudioBase64  || existing.tts  || null,
+    };
+
+    localStorage.setItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error('Erro ao salvar áudio speaking por id:', e);
+  }
+}
+
+function loadSpeakingAudioByIdMap() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (e) {
+    console.error('Erro ao carregar áudio speaking por id:', e);
+  }
+  return {};
 }
 
 /* Renderização pura (sem salvar) */
@@ -1113,6 +1151,16 @@ async function sendSpeakingAudio(base64, durationMs){
     }
 
     const data = await res.json();
+
+    // salva áudios desta tentativa por ID neste dispositivo
+    if (data && data.id) {
+      try {
+        saveSpeakingAudioById(data.id, base64, data.audioBase64 || null);
+      } catch (e) {
+        console.error("Erro ao salvar áudios speaking por id:", e);
+      }
+    }
+
     showSpeakingResult(data);
     speakStatus.textContent = "Correção recebida.";
   } catch (err) {
@@ -1154,6 +1202,9 @@ async function loadRemoteHistory() {
       return;
     }
 
+    // carrega o mapa de áudios por ID deste dispositivo
+    const audioById = loadSpeakingAudioByIdMap();
+
     // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
@@ -1162,18 +1213,48 @@ async function loadRemoteHistory() {
 
       // 1) SPEAKING (kind === "speaking")
       if (item.kind === "speaking") {
-        if (item.role === "user" && item.audioBase64) {
-          // áudio enviado pelo aluno
-          renderStudentAudioMessage(item.audioBase64);
+        const id = item.id;
+        let userAudioLocal = null;
+        let ttsAudioLocal  = null;
+
+        if (id && audioById[id]) {
+          userAudioLocal = audioById[id].user || null;
+          ttsAudioLocal  = audioById[id].tts  || null;
+        }
+
+        if (item.role === "user") {
+          const audioToUse =
+            item.audioBase64 ||        // caso antigo (se ainda vier do servidor)
+            userAudioLocal ||          // áudio gravado neste dispositivo
+            null;
+
+          if (audioToUse) {
+            renderStudentAudioMessage(audioToUse);
+          } else {
+            // sem áudio local → provavelmente gravado em outro dispositivo.
+            const el = document.createElement('div');
+            el.className = 'msg user speak-msg';
+            el.innerHTML = `
+              <strong>Você:</strong>
+              <div class="speak-meta">(áudio gravado em outro dispositivo ou não disponível neste navegador)</div>
+            `;
+            speakConversation.appendChild(el);
+            speakConversation.scrollTop = speakConversation.scrollHeight;
+          }
         } else if (item.role === "assistant") {
-          // resposta da IA com TTS + feedback
+          const audioToUse =
+            item.audioBase64 ||    // caso antigo
+            ttsAudioLocal  ||      // TTS salvo neste dispositivo
+            null;
+
           renderAIAudioMessage({
             transcript: item.transcript || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text: item.feedback_text || "",
-            audioBase64: item.audioBase64 || null,
+            audioBase64: audioToUse,
           });
         }
+
         return; // não deixa cair na parte de chat
       }
 
