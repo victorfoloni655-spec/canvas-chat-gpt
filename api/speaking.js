@@ -1,8 +1,7 @@
 // /api/speaking.js
 // Recebe áudio do Speaking Lab, controla uso em segundos
 // e devolve: transcrição, frase correta, feedback e TTS em base64.
-// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking"),
-// mas **sem** guardar áudio em base64 no Redis (apenas texto).
+// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking").
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -28,8 +27,7 @@ const CHECKOUT_URL_SPEAK_10 = process.env.CHECKOUT_URL_SPEAK_10 || null;
 
 // Histórico (mesmo prefixo do chat)
 const HISTORY_PREFIX = process.env.HISTORY_PREFIX || "history";
-// default maior, mas ainda seguro (só texto)
-const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 160);
+const HISTORY_MAX    = Number(process.env.HISTORY_MAX || 80);
 
 function parseCookies(h = "") {
   return Object.fromEntries((h || "").split(";").map(s => s.trim().split("=")));
@@ -282,33 +280,34 @@ function buildSpokenText(correct_sentence, feedback_text) {
   return `Check this: ${sent}. ${ptPart}`;
 }
 
-// --------- HISTÓRICO SPEAKING (SEM ÁUDIO NO REDIS) ---------
+// --------- HISTÓRICO SPEAKING ---------
 
-async function appendSpeakingHistory(
-  userId,
-  { transcript, correct_sentence, feedback_text, usedSeconds, limitSeconds }
-) {
+async function appendSpeakingHistory(userId, {
+  userAudioBase64,
+  transcript,
+  correct_sentence,
+  feedback_text,
+  ttsAudioBase64,
+}) {
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
-    // Entrada do aluno (somente texto / transcript)
     const entryUser = JSON.stringify({
       kind: "speaking",
       role: "user",
+      audioBase64: userAudioBase64 || null,
       transcript: transcript || null,
       ts: now,
     });
 
-    // Entrada da IA (somente texto + info de quota)
     const entryBot = JSON.stringify({
       kind: "speaking",
       role: "assistant",
       transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      usedSeconds: typeof usedSeconds === "number" ? usedSeconds : null,
-      limitSeconds: typeof limitSeconds === "number" ? limitSeconds : null,
+      audioBase64: ttsAudioBase64 || null,
       ts: now,
     });
 
@@ -347,7 +346,6 @@ export default async function handler(req, res) {
     if (typeof durationMs === "number" && durationMs > 0) {
       secondsThisCall = Math.round(durationMs / 1000);
     } else {
-      // fallback bem aproximado, caso durationMs não venha
       const approxSeconds = Math.round((audio.length * 3) / (4 * 32000));
       secondsThisCall = approxSeconds > 0 ? approxSeconds : 1;
     }
@@ -402,24 +400,20 @@ export default async function handler(req, res) {
       throw new Error("OPENAI_API_KEY não configurada.");
     }
 
-    // 1) Transcrição
-    const transcriptStr = await transcribeAudio(audio);
-    const transcript    = transcriptStr || "";
-
-    // 2) Feedback (frase corrigida + texto em pt)
+    const transcriptObj = await transcribeAudio(audio);
+    const transcript    = transcriptObj || "";
     const { correct_sentence, feedback_text } = await buildFeedback(transcript);
 
-    // 3) TTS com resumo falado
-    const spokenText  = buildSpokenText(correct_sentence, feedback_text);
+    const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
-    // 4) Salva histórico APENAS TEXTO no Redis
+    // salva histórico integrated
     await appendSpeakingHistory(userId, {
+      userAudioBase64: audio,
       transcript,
       correct_sentence,
       feedback_text,
-      usedSeconds: newTotal,
-      limitSeconds: SPEAKING_LIMIT_SECONDS,
+      ttsAudioBase64: audioBase64,
     });
 
     // debug: quantos registros totais (chat + speaking) esse user tem?
@@ -431,14 +425,11 @@ export default async function handler(req, res) {
       console.error("Erro ao ler histórico speaking para debug:", e);
     }
 
-    // 5) Resposta para o frontend:
-    //    - transcript / correct_sentence / feedback_text / audioBase64
-    //    - usado para localStorage + UI
     return res.status(200).json({
       transcript,
       correct_sentence,
       feedback_text,
-      audioBase64,                 // áudio SÓ aqui na resposta HTTP, não no Redis
+      audioBase64,
       usedSeconds: newTotal,
       limitSeconds: SPEAKING_LIMIT_SECONDS,
       userId,
