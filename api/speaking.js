@@ -1,11 +1,10 @@
 // /api/speaking.js
 // Recebe áudio do Speaking Lab, controla uso em segundos
 // e devolve: transcrição, frase correta, feedback e TTS em base64.
-// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking") SEM guardar áudio.
+// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking").
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
-import { randomUUID } from "crypto"; // ✅ NOVO: para gerar id único por tentativa
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -281,10 +280,9 @@ function buildSpokenText(correct_sentence, feedback_text) {
   return `Check this: ${sent}. ${ptPart}`;
 }
 
-// --------- HISTÓRICO SPEAKING (sem áudio) ---------
+// --------- HISTÓRICO SPEAKING ---------
 
 async function appendSpeakingHistory(userId, {
-  speakingId,
   userAudioBase64,
   transcript,
   correct_sentence,
@@ -295,24 +293,24 @@ async function appendSpeakingHistory(userId, {
     const key = historyKey(userId);
     const now = Date.now();
 
-    // Não guardar audioBase64 no Redis, só texto + flags + id
+    // ⚠️ IMPORTANTE:
+    // - Não salvamos mais audioBase64 no Redis.
+    // - Guardamos só texto + um flag dizendo se tinha áudio.
     const entryUser = JSON.stringify({
-      id: speakingId,
       kind: "speaking",
       role: "user",
       transcript: transcript || null,
-      hasAudio: !!userAudioBase64,
+      hasAudio: !!userAudioBase64,  // só um indicador leve
       ts: now,
     });
 
     const entryBot = JSON.stringify({
-      id: speakingId,
       kind: "speaking",
       role: "assistant",
       transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      hasAudio: !!ttsAudioBase64,
+      hasAudio: !!ttsAudioBase64,   // idem
       ts: now,
     });
 
@@ -405,9 +403,6 @@ export default async function handler(req, res) {
       throw new Error("OPENAI_API_KEY não configurada.");
     }
 
-    // ✅ gera id único pra essa tentativa de speaking
-    const speakingId = randomUUID();
-
     const transcriptObj = await transcribeAudio(audio);
     const transcript    = transcriptObj || "";
     const { correct_sentence, feedback_text } = await buildFeedback(transcript);
@@ -415,9 +410,8 @@ export default async function handler(req, res) {
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
-    // salva histórico (sem áudio)
+    // salva histórico integrated
     await appendSpeakingHistory(userId, {
-      speakingId,
       userAudioBase64: audio,
       transcript,
       correct_sentence,
@@ -435,11 +429,10 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      id: speakingId,                  // ✅ importante para o localStorage
       transcript,
       correct_sentence,
       feedback_text,
-      audioBase64,                     // TTS só volta aqui (não vai pro Redis)
+      audioBase64,
       usedSeconds: newTotal,
       limitSeconds: SPEAKING_LIMIT_SECONDS,
       userId,
