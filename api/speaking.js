@@ -293,11 +293,14 @@ async function appendSpeakingHistory(userId, {
     const key = historyKey(userId);
     const now = Date.now();
 
+    // ⚠️ IMPORTANTE:
+    // - Não salvamos mais audioBase64 no Redis.
+    // - Guardamos só texto + um flag dizendo se tinha áudio.
     const entryUser = JSON.stringify({
       kind: "speaking",
       role: "user",
-      audioBase64: userAudioBase64 || null,
       transcript: transcript || null,
+      hasAudio: !!userAudioBase64,  // só um indicador leve
       ts: now,
     });
 
@@ -307,7 +310,7 @@ async function appendSpeakingHistory(userId, {
       transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      audioBase64: ttsAudioBase64 || null,
+      hasAudio: !!ttsAudioBase64,   // idem
       ts: now,
     });
 
