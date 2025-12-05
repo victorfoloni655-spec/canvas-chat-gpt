@@ -1169,7 +1169,7 @@ async function sendSpeakingAudio(base64, durationMs){
   }
 }
 
-/* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
+/* ---------- HISTÓRICO REMOTO (chat via /api/history) ---------- */
 async function loadRemoteHistory() {
   try {
     const t = getToken();
@@ -1182,19 +1182,18 @@ async function loadRemoteHistory() {
     const url = `/api/history?${params.toString()}`;
 
     const res = await fetch(url, { credentials: "include" });
-    
+
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: usa o que já tiver salvo localmente
-      loadLocalHistory();
-      loadSpeakHistory();
+      // fallback totalmente local
+      loadLocalHistory();   // chat local
+      loadSpeakHistory();   // speaking local (áudio + feedback)
       return;
     }
 
     const data = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
 
-    // se não tiver nada no Redis, volta pro localStorage
     if (!items.length) {
       console.log("Histórico remoto vazio; usando fallback localStorage.");
       loadLocalHistory();
@@ -1202,75 +1201,32 @@ async function loadRemoteHistory() {
       return;
     }
 
-    // carrega o mapa de áudios por ID deste dispositivo
-    const audioById = loadSpeakingAudioByIdMap();
-
     // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach((item) => {
       if (!item) return;
 
-      // 1) SPEAKING (kind === "speaking")
-      if (item.kind === "speaking") {
-        const id = item.id;
-        let userAudioLocal = null;
-        let ttsAudioLocal  = null;
+      // ❌ NÃO renderizamos speaking a partir do Redis
+      // (áudios e feedbacks vão vir só do localStorage)
+      if (item.kind === "speaking") return;
 
-        if (id && audioById[id]) {
-          userAudioLocal = audioById[id].user || null;
-          ttsAudioLocal  = audioById[id].tts  || null;
-        }
-
-        if (item.role === "user") {
-          const audioToUse =
-            item.audioBase64 ||        // caso antigo (se ainda vier do servidor)
-            userAudioLocal ||          // áudio gravado neste dispositivo
-            null;
-
-          if (audioToUse) {
-            renderStudentAudioMessage(audioToUse);
-          } else {
-            // sem áudio local → provavelmente gravado em outro dispositivo.
-            const el = document.createElement('div');
-            el.className = 'msg user speak-msg';
-            el.innerHTML = `
-              <strong>Você:</strong>
-              <div class="speak-meta">(áudio gravado em outro dispositivo ou não disponível neste navegador)</div>
-            `;
-            speakConversation.appendChild(el);
-            speakConversation.scrollTop = speakConversation.scrollHeight;
-          }
-        } else if (item.role === "assistant") {
-          const audioToUse =
-            item.audioBase64 ||    // caso antigo
-            ttsAudioLocal  ||      // TTS salvo neste dispositivo
-            null;
-
-          renderAIAudioMessage({
-            transcript: item.transcript || "",
-            correct_sentence: item.correct_sentence || "",
-            feedback_text: item.feedback_text || "",
-            audioBase64: audioToUse,
-          });
-        }
-
-        return; // não deixa cair na parte de chat
-      }
-
-      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
+      // CHAT normal
       if (typeof item.content !== "string") return;
 
       const who = item.role === "user" ? "user" : "bot";
       addMsg(item.content, who);
 
-      // alimenta o array messages pra manter o contexto da conversa
+      // Alimenta o array messages pra manter o contexto da conversa
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
+
+    // Depois de carregar o chat remoto, renderiza o histórico de speaking local
+    loadSpeakHistory();
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
-    // fallback local se der erro na rede
+    // fallback totalmente local
     loadLocalHistory();
     loadSpeakHistory();
   }
