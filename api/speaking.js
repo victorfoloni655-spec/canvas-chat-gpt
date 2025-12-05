@@ -1,7 +1,7 @@
 // /api/speaking.js
 // Recebe áudio do Speaking Lab, controla uso em segundos
 // e devolve: transcrição, frase correta, feedback e TTS em base64.
-// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking").
+// ALSO: salva histórico no mesmo Redis do chat (kind: "speaking"), SEM áudio.
 
 import { Redis } from "@upstash/redis";
 import { jwtVerify } from "jose";
@@ -280,37 +280,43 @@ function buildSpokenText(correct_sentence, feedback_text) {
   return `Check this: ${sent}. ${ptPart}`;
 }
 
-// --------- HISTÓRICO SPEAKING ---------
+// --------- HISTÓRICO SPEAKING (sem áudio no Redis) ---------
 
-async function appendSpeakingHistory(userId, {
-  userAudioBase64,
-  transcript,
-  correct_sentence,
-  feedback_text,
-  ttsAudioBase64,
-}) {
+async function appendSpeakingHistory(
+  userId,
+  speakingId,
+  {
+    userAudioBase64,
+    transcript,
+    correct_sentence,
+    feedback_text,
+    ttsAudioBase64,
+  }
+) {
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
     // ⚠️ IMPORTANTE:
-    // - Não salvamos mais audioBase64 no Redis.
-    // - Guardamos só texto + um flag dizendo se tinha áudio.
+    // - Não salvamos audioBase64 no Redis.
+    // - Guardamos só texto + um flag dizendo se tinha áudio + id para mapear localStorage.
     const entryUser = JSON.stringify({
+      id: speakingId,
       kind: "speaking",
       role: "user",
       transcript: transcript || null,
-      hasAudio: !!userAudioBase64,  // só um indicador leve
+      hasAudio: !!userAudioBase64,
       ts: now,
     });
 
     const entryBot = JSON.stringify({
+      id: speakingId,
       kind: "speaking",
       role: "assistant",
       transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      hasAudio: !!ttsAudioBase64,   // idem
+      hasAudio: !!ttsAudioBase64,
       ts: now,
     });
 
@@ -410,8 +416,15 @@ export default async function handler(req, res) {
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
-    // salva histórico integrated
-    await appendSpeakingHistory(userId, {
+    // 🔹 gera um ID único desta tentativa (mesmo ID para user+assistant)
+    const speakingId =
+      "spk_" +
+      Date.now().toString(36) +
+      "_" +
+      Math.random().toString(36).slice(2, 10);
+
+    // salva histórico integrado (sem áudio no Redis)
+    await appendSpeakingHistory(userId, speakingId, {
       userAudioBase64: audio,
       transcript,
       correct_sentence,
@@ -429,6 +442,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
+      id: speakingId, // 🔹 usado pelo front para mapear áudios no localStorage
       transcript,
       correct_sentence,
       feedback_text,
