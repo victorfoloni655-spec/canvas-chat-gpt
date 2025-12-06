@@ -201,6 +201,12 @@
     font-weight: 500;
   }
 
+  .btn-danger {
+    background: #ef4444;
+    color: #fff;
+    border-color: transparent;
+  }
+
   .btn-recording {
     background: #ef4444;
     color: #fff;
@@ -313,6 +319,10 @@
     line-height: 1.0;
     font-weight: 600;
   }
+ 
+  .speak-controls #record-btn {
+    min-width: 120px;       /* garante que ele fique larguinho */
+  }
 
   @media (max-width: 600px) {
     .wrap { padding: 8px; }
@@ -363,12 +373,12 @@
       <div id="speak-section">
         <div class="speak-box">
           <p class="speak-helper">
-            Grave uma frase em inglês para treinar sua pronúncia. Você receberá a frase modelo, feedback escrito e um áudio curto com correção.
+            Grave uma frase em inglês para treinar sua pronúncia. Você receberá feedback escrito e um áudio com correção.
           </p>
 
           <div class="speak-controls">
             <button id="record-btn">🎙️ Gravar</button>
-            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar gravação</button>
+            <button id="cancel-record-btn" class="btn-secondary" disabled>Cancelar</button>
             <span id="record-timer">00:00</span>
           </div>
 
@@ -386,7 +396,8 @@ const QUOTA_URL   = '/api/quota';
 const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
 const LOCAL_UID_KEY           = 'ia_english_uid_v1';
-
+const LOCAL_SPEAK_AUDIO_BY_ID_KEY = 'ia_english_speaking_audio_by_id_v1';
+  
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
 const btn     = document.getElementById('send');
@@ -768,23 +779,60 @@ async function atualizarQuotaChat(){
   }
 }
 
+/* ---------- QUOTA SPEAKING (carregar ao iniciar) ---------- */
+async function loadSpeakingQuotaOnStart() {
+  try {
+    const t = getToken();
+    const url = t
+      ? `/api/speaking-quota?t=${encodeURIComponent(t)}`
+      : '/api/speaking-quota';
+
+    const res = await fetch(url, { credentials: 'include' });
+
+    if (!res.ok) {
+      console.warn('speaking-quota não disponível:', res.status);
+      return;
+    }
+
+    const j = await res.json().catch(() => ({}));
+    if (typeof j.usedSeconds === 'number' && typeof j.limitSeconds === 'number') {
+      speakingQuota = {
+        usedSeconds: j.usedSeconds,
+        limitSeconds: j.limitSeconds
+      };
+      updateBadge();
+    }
+  } catch (e) {
+    console.error('Erro ao buscar quota speaking:', e);
+  }
+}
+
 /* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
+    // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
-      badge.textContent = `restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
+      badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
   } else {
+    // Modo SPEAKING → mostra minutos + segundos
     if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
       const used  = speakingQuota.usedSeconds || 0;
       const limit = speakingQuota.limitSeconds;
-      const remainingMin = Math.max(0, (limit - used) / 60);
-      const limitMin     = limit / 60;
-      badge.textContent = `restante ${remainingMin.toFixed(1)} / ${limitMin.toFixed(1)} min`;
+
+      const remainingSec = Math.max(0, limit - used);
+      const limitSec     = limit;
+
+      const rMin = Math.floor(remainingSec / 60);
+      const rSec = remainingSec % 60;
+
+      const lMin = Math.floor(limitSec / 60);
+
+      badge.textContent = `restante ${rMin}m ${String(rSec).padStart(2,'0')}s / ${lMin}m`;
     } else {
-      badge.textContent = 'restante -- / -- min';
+      badge.textContent = 'Restante -- / -- min';
     }
   }
 }
@@ -792,17 +840,29 @@ function updateBadge() {
 /* ---------- TROCA DE TELA ---------- */
 function setMode(mode) {
   currentMode = mode;
+
   if (mode === 'chat') {
     tabChat.classList.add('active');
     tabSpeak.classList.remove('active');
     chatSection.style.display  = 'flex';
     speakSection.style.display = 'none';
+
+    // garante que o chat abra sempre no final
+    setTimeout(() => {
+      chat.scrollTop = chat.scrollHeight;
+    }, 50);
   } else {
     tabChat.classList.remove('active');
     tabSpeak.classList.add('active');
     chatSection.style.display  = 'none';
     speakSection.style.display = 'flex';
+
+    // sempre que abrir a aba de Pronunciation, rola pro último áudio
+    setTimeout(() => {
+      speakConversation.scrollTop = speakConversation.scrollHeight;
+    }, 50);
   }
+
   updateBadge();
 }
 
@@ -893,9 +953,14 @@ let recordTimerId = null;
 function resetRecordingUI(){
   isRecording = false;
   recordBtn.disabled = false;
-  recordBtn.textContent = '🎙️ Gravar';
-  recordBtn.classList.remove('btn-recording');
+  recordBtn.textContent = '🎙️ Gravar';       // volta pro texto original
+  recordBtn.classList.remove('btn-recording'); // só por garantia
+
+  // volta o cancelar pro estilo "secundário" e desabilitado
   cancelRecordBtn.disabled = true;
+  cancelRecordBtn.classList.remove('btn-danger');
+  cancelRecordBtn.classList.add('btn-secondary');
+
   if (recordTimerId) {
     clearInterval(recordTimerId);
     recordTimerId = null;
@@ -916,10 +981,17 @@ async function startRecording(){
     isRecording = true;
     isCancelling = false;
     recordStart = Date.now();
+
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
-    recordBtn.textContent = "Parar e enviar";
-    recordBtn.classList.add('btn-recording');
+
+    // Botão principal: tiffany e vira "Enviar"
+    recordBtn.textContent = "Enviar";
+    recordBtn.classList.remove('btn-recording');
+
+    // Botão cancelar: vermelho
     cancelRecordBtn.disabled = false;
+    cancelRecordBtn.classList.remove('btn-secondary');
+    cancelRecordBtn.classList.add('btn-danger');
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
@@ -1050,23 +1122,7 @@ async function sendSpeakingAudio(base64, durationMs){
   }
 }
 
-/* ---------- EVENTOS ---------- */
-btn.addEventListener('click', send);
-input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
-
-tabChat.addEventListener('click', () => setMode('chat'));
-tabSpeak.addEventListener('click', () => setMode('speaking'));
-
-recordBtn.addEventListener('click', () => {
-  if (!isRecording) startRecording();
-  else stopRecording(true);
-});
-
-cancelRecordBtn.addEventListener('click', () => {
-  if (isRecording) stopRecording(false);
-});
-
-// ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ----------
+/* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
 async function loadRemoteHistory() {
   try {
     const t = getToken();
@@ -1140,11 +1196,28 @@ async function loadRemoteHistory() {
   }
 }
 
+/* ---------- EVENTOS ---------- */
+btn.addEventListener('click', send);
+input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+
+tabChat.addEventListener('click', () => setMode('chat'));
+tabSpeak.addEventListener('click', () => setMode('speaking'));
+
+recordBtn.addEventListener('click', () => {
+  if (!isRecording) startRecording();
+  else stopRecording(true);
+});
+
+cancelRecordBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording(false);
+});
+
 /* ---------- INIT ---------- */
 captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
 loadRemoteHistory();
+loadSpeakingQuotaOnStart();
 </script>
 </body>
 </html>
