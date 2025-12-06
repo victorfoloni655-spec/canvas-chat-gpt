@@ -1124,6 +1124,21 @@ async function sendSpeakingAudio(base64, durationMs){
 
 /* ---------- HISTÓRICO REMOTO (chat + speaking via /api/history) ---------- */
 async function loadRemoteHistory() {
+  // 1) Verifica se já existe histórico local de speaking (áudios) neste navegador
+  let hasLocalSpeak = false;
+  try {
+    const rawLocal = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+    if (rawLocal) {
+      const arrLocal = JSON.parse(rawLocal);
+      if (Array.isArray(arrLocal) && arrLocal.length > 0) {
+        hasLocalSpeak = true;
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao checar histórico local de speaking:', e);
+    hasLocalSpeak = false;
+  }
+
   try {
     const t = getToken();
 
@@ -1139,8 +1154,8 @@ async function loadRemoteHistory() {
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
       // fallback: usa o que já tiver salvo localmente
-      loadLocalHistory();
-      loadSpeakHistory();
+      loadLocalHistory();   // chat local
+      loadSpeakHistory();   // speaking local
       return;
     }
 
@@ -1163,16 +1178,36 @@ async function loadRemoteHistory() {
 
       // 1) SPEAKING (kind === "speaking")
       if (item.kind === "speaking") {
-        if (item.role === "user" && item.audioBase64) {
-          // áudio enviado pelo aluno
-          renderStudentAudioMessage(item.audioBase64);
+        // Se já temos histórico local de speaking neste navegador,
+        // deixamos o localStorage cuidar da renderização (incluindo áudio)
+        if (hasLocalSpeak) {
+          return;
+        }
+
+        // Sem histórico local: renderiza versão remota (somente texto)
+        if (item.role === "user") {
+          const el = document.createElement('div');
+          el.className = 'msg user speak-msg';
+
+          const transcriptText = item.transcript
+            ? escapeHtml(item.transcript)
+            : '(sem transcrição disponível)';
+
+          el.innerHTML = `
+            <strong>Você:</strong> ${transcriptText}
+            <div class="speak-meta">
+              (áudio gravado em outro dispositivo ou não disponível neste navegador)
+            </div>
+          `;
+          speakConversation.appendChild(el);
+          speakConversation.scrollTop = speakConversation.scrollHeight;
         } else if (item.role === "assistant") {
-          // resposta da IA com TTS + feedback
+          // Aqui usamos só texto do Redis (sem áudio)
           renderAIAudioMessage({
             transcript: item.transcript || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text: item.feedback_text || "",
-            audioBase64: item.audioBase64 || null,
+            audioBase64: null   // áudio não vem mais do Redis
           });
         }
         return; // não deixa cair na parte de chat
@@ -1188,6 +1223,12 @@ async function loadRemoteHistory() {
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
+
+    // Depois de desenhar o que veio do Redis,
+    // se este navegador tiver histórico local de speaking, renderiza-o
+    if (hasLocalSpeak) {
+      loadSpeakHistory();
+    }
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
     // fallback local se der erro na rede
