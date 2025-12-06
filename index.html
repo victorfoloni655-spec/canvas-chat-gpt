@@ -1140,7 +1140,7 @@ async function loadRemoteHistory() {
       console.error("Erro ao carregar histórico remoto:", res.status);
       // fallback: usa o que já tiver salvo localmente
       loadLocalHistory();   // chat local
-      loadSpeakHistory();   // speaking local (inclui áudios)
+      loadSpeakHistory();   // speaking local (com áudios deste navegador)
       return;
     }
 
@@ -1161,46 +1161,13 @@ async function loadRemoteHistory() {
     items.forEach((item) => {
       if (!item) return;
 
-      // 1) SPEAKING (kind === "speaking")
+      // 🔹 Aqui ignoramos completamente SPEAKING vindo do Redis.
+      // O speaking será desenhado só a partir do localStorage.
       if (item.kind === "speaking") {
-        if (item.role === "user") {
-          // mostramos a transcrição que veio do Redis
-          const el = document.createElement('div');
-          el.className = 'msg user speak-msg';
-
-          const transcriptText = item.transcript
-            ? escapeHtml(item.transcript)
-            : '(sem transcrição disponível)';
-
-          let extra = '';
-          // se não temos o áudio no Redis, avisamos
-          if (!item.audioBase64 && !item.hasAudio) {
-            extra = `
-              <div class="speak-meta">
-                (áudio gravado em outro dispositivo ou não disponível neste navegador)
-              </div>
-            `;
-          }
-
-          el.innerHTML = `
-            <strong>Você:</strong> ${transcriptText}
-            ${extra}
-          `;
-          speakConversation.appendChild(el);
-          speakConversation.scrollTop = speakConversation.scrollHeight;
-        } else if (item.role === "assistant") {
-          // resposta da IA vinda do Redis (texto); sem áudio aqui
-          renderAIAudioMessage({
-            transcript: item.transcript || "",
-            correct_sentence: item.correct_sentence || "",
-            feedback_text: item.feedback_text || "",
-            audioBase64: null   // não vem mais do Redis
-          });
-        }
-        return; // não deixa cair na parte de chat
+        return;
       }
 
-      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
+      // CHAT (kind "chat" ou sem kind)
       if (typeof item.content !== "string") return;
 
       const who = item.role === "user" ? "user" : "bot";
@@ -1211,8 +1178,8 @@ async function loadRemoteHistory() {
       messages.push({ role, content: item.content });
     });
 
-    // Depois de desenhar o histórico remoto (chat + speaking texto),
-    // carregamos também o histórico local de speaking (com áudios deste navegador)
+    // Depois de renderizar o chat remoto,
+    // carregamos o histórico local de SPEAKING (com áudio deste navegador).
     loadSpeakHistory();
 
   } catch (err) {
