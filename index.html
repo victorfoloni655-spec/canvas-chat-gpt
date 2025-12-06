@@ -562,17 +562,20 @@ function saveSpeakHistory(entry) {
       if (Array.isArray(parsed)) arr = parsed;
     }
     arr.push(entry);
+
+    // limita pra não explodir o storage (ex.: últimas 40 interações)
     if (arr.length > 40) {
       arr = arr.slice(arr.length - 40);
     }
+
     localStorage.setItem(LOCAL_SPEAK_HISTORY_KEY, JSON.stringify(arr));
   } catch (e) {
     console.error('Erro ao salvar histórico speaking:', e);
   }
 }
 
-/* Renderização pura (sem salvar) */
-function renderStudentAudioMessage(base64){
+/* Renderiza só o áudio do aluno (sem salvar) */
+function renderStudentAudioMessage(base64) {
   const el = document.createElement('div');
   el.className = 'msg user speak-msg';
   el.innerHTML = `
@@ -583,7 +586,7 @@ function renderStudentAudioMessage(base64){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* ---------- helpers de HTML/diff ---------- */
+/* Renderiza só a resposta da IA (sem salvar) */
 function escapeHtml(str){
   return String(str || "")
     .replace(/&/g,"&amp;")
@@ -591,68 +594,6 @@ function escapeHtml(str){
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
     .replace(/'/g,"&#039;");
-}
-
-function normalizeSentence(str) {
-  return String(str || '')
-    .toLowerCase()
-    .replace(/[.,!?;:"]/g, '')
-    .trim();
-}
-
-function badToken(word) {
-  return `<span class="speak-bad-token">${escapeHtml(word)}</span>`;
-}
-function goodToken(word) {
-  return `<span class="speak-good-token">${escapeHtml(word)}</span>`;
-}
-
-function tokenizeSentence(str) {
-  return String(str || '')
-    .trim()
-    .split(/\s+/);
-}
-
-function buildHighlightedSentences(original, corrected) {
-  const origTokens = tokenizeSentence(original);
-  const corrTokens = tokenizeSentence(corrected);
-  const maxLen = Math.max(origTokens.length, corrTokens.length);
-
-  const origParts = [];
-  const corrParts = [];
-
-  for (let i = 0; i < maxLen; i++) {
-    const o = origTokens[i];
-    const c = corrTokens[i];
-
-    if (o === undefined && c !== undefined) {
-      corrParts.push(goodToken(c));
-      continue;
-    }
-
-    if (c === undefined && o !== undefined) {
-      origParts.push(badToken(o));
-      continue;
-    }
-
-    if (o === c) {
-      const safe = escapeHtml(o);
-      origParts.push(safe);
-      corrParts.push(safe);
-    } else {
-      if (o !== undefined) {
-        origParts.push(badToken(o));
-      }
-      if (c !== undefined) {
-        corrParts.push(goodToken(c));
-      }
-    }
-  }
-
-  return {
-    originalHtml: origParts.join(' '),
-    correctedHtml: corrParts.join(' ')
-  };
 }
 
 function renderAIAudioMessage(data){
@@ -669,27 +610,13 @@ function renderAIAudioMessage(data){
     audioPart = `<audio controls src="data:audio/mp3;base64,${audioBase64}"></audio>`;
   }
 
-  const { originalHtml, correctedHtml } = buildHighlightedSentences(t, c);
-
-  const sameSentence =
-    transcript && correct_sentence &&
-    normalizeSentence(transcript) === normalizeSentence(correct_sentence);
-
-  let metaInner = `
-    <strong>Você disse:</strong> ${originalHtml}<br>
-  `;
-
-  if (!sameSentence) {
-    metaInner += `<strong>Melhor maneira de dizer:</strong> ${correctedHtml}<br>`;
-  }
-
-  metaInner += `<strong>Feedback:</strong> ${escapeHtml(f)}`;
-
   el.innerHTML = `
     <strong>IA:</strong>
     ${audioPart}
     <div class="speak-meta">
-      ${metaInner}
+      <strong>Você disse:</strong> ${escapeHtml(t)}<br>
+      <strong>Melhor maneira de dizer:</strong> ${escapeHtml(c)}<br>
+      <strong>Feedback:</strong> ${escapeHtml(f)}
     </div>
   `;
 
@@ -697,7 +624,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam */
+/* Versões que renderizam + SALVAM no localStorage */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -720,6 +647,7 @@ function appendAIAudioMessage(data){
   });
 }
 
+/* Carrega tudo do localStorage quando a página abre */
 function loadSpeakHistory() {
   try {
     const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
@@ -729,6 +657,7 @@ function loadSpeakHistory() {
 
     arr.forEach(item => {
       if (!item || !item.role) return;
+
       if (item.role === 'user' && item.audioBase64) {
         renderStudentAudioMessage(item.audioBase64);
       } else if (item.role === 'assistant') {
@@ -1144,7 +1073,9 @@ async function loadRemoteHistory() {
 captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
-loadRemoteHistory();
+loadRemoteHistory();      // chat (texto) do Redis
+loadSpeakingQuotaOnStart();
+loadSpeakHistory();       // speaking (áudio + feedback) do localStorage
 </script>
 </body>
 </html>
