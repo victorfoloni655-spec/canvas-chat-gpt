@@ -1172,24 +1172,23 @@ async function loadRemoteHistory() {
 
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: usa o que já tiver salvo localmente
+      // fallback: só o histórico de chat salvo localmente
       loadLocalHistory();
-      loadSpeakHistory();
       return;
     }
 
-    const data  = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
 
     if (!items.length) {
-      console.log("Histórico remoto vazio; usando fallback localStorage.");
+      console.log("Histórico remoto vazio; usando chat local.");
       loadLocalHistory();
-      loadSpeakHistory();
       return;
     }
 
-    // Áudios salvos neste navegador (por pairId)
-    const audioMap = getSpeakAudioByIdMap();
+    // Se já carregamos speaking do localStorage,
+    // não vamos duplicar com o que vem do Redis.
+    const hasLocalSpeaking = speakConversation.children.length > 0;
 
     // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
@@ -1197,47 +1196,42 @@ async function loadRemoteHistory() {
     items.forEach((item) => {
       if (!item) return;
 
-      // ---------- SPEAKING ----------
+      // 1) SPEAKING
       if (item.kind === "speaking") {
-        const role   = item.role === "user" ? "user" : "assistant";
-        const pairId = item.pairId || null;
-        const audioPair = pairId ? audioMap[pairId] : null;
+        // Se já temos histórico de speaking local, ignoramos o remoto
+        if (hasLocalSpeaking) return;
 
-        if (role === "user") {
-          // áudio do aluno
-          if (audioPair && audioPair.userAudioBase64) {
-            renderStudentAudioMessage(audioPair.userAudioBase64);
-          } else {
+        if (item.role === "user") {
+          // histórico antigo pode ter audioBase64;
+          // o novo só tem transcript + hasAudio.
+          if (item.audioBase64) {
+            renderStudentAudioMessage(item.audioBase64);
+          } else if (item.transcript) {
             const el = document.createElement("div");
             el.className = "msg user speak-msg";
-            const texto = item.transcript
-              ? escapeHtml(item.transcript)
-              : "(áudio gravado em outro dispositivo ou não disponível neste navegador)";
-            el.innerHTML = `<strong>Você:</strong> ${texto}`;
+            el.innerHTML =
+              `<strong>Você:</strong> ${escapeHtml(item.transcript)}`;
             speakConversation.appendChild(el);
             speakConversation.scrollTop = speakConversation.scrollHeight;
           }
-        } else {
-          // resposta da IA + TTS
-          const ttsBase64 =
-            audioPair && audioPair.ttsAudioBase64 ? audioPair.ttsAudioBase64 : null;
-
+        } else if (item.role === "assistant") {
           renderAIAudioMessage({
             transcript: item.transcript || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text: item.feedback_text || "",
-            audioBase64: ttsBase64,
+            audioBase64: item.audioBase64 || null, // geralmente null agora
           });
         }
         return; // não deixa cair na parte de chat
       }
 
-      // ---------- CHAT ----------
+      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
       if (typeof item.content !== "string") return;
 
       const who = item.role === "user" ? "user" : "bot";
       addMsg(item.content, who);
 
+      // alimenta o array messages pra manter o contexto da conversa
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
@@ -1245,7 +1239,6 @@ async function loadRemoteHistory() {
     console.error("Erro ao buscar histórico remoto:", err);
     // fallback local se der erro na rede
     loadLocalHistory();
-    loadSpeakHistory();
   }
 }
 
@@ -1269,8 +1262,16 @@ cancelRecordBtn.addEventListener('click', () => {
 captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
-loadRemoteHistory();        // carrega chat (Redis) + speaking (localStorage)
-loadSpeakingQuotaOnStart(); // só o contador de minutos
+
+// 1) Primeiro: tenta reconstruir os áudios de speaking do navegador
+loadSpeakHistory();
+
+// 2) Depois: carrega o histórico remoto (chat e, se não houver nada local,
+//    também os textos de speaking)
+loadRemoteHistory();
+
+// 3) Carrega a quota de minutos de áudio
+loadSpeakingQuotaOnStart();
 </script>
 </body>
 </html>
