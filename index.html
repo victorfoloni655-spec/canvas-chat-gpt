@@ -1164,7 +1164,6 @@ async function loadRemoteHistory() {
 
     const params = new URLSearchParams();
     if (t) params.set("t", t);
-    // param extra só pra garantir que o browser não cache
     params.set("_", Date.now().toString());
 
     const url = `/api/history?${params.toString()}`;
@@ -1172,7 +1171,6 @@ async function loadRemoteHistory() {
 
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: só o histórico de chat salvo localmente
       loadLocalHistory();
       return;
     }
@@ -1186,7 +1184,9 @@ async function loadRemoteHistory() {
       return;
     }
 
-    // ordem cronológica
+    // 👉 verifica se já temos speaking salvo localmente
+    const hasLocalSpeaking = !!localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach((item) => {
@@ -1195,16 +1195,17 @@ async function loadRemoteHistory() {
       // 1) SPEAKING – texto global (sem áudio do Redis)
       if (item.kind === "speaking") {
 
+        // 👉 se já tem histórico local, não renderiza o remoto
+        if (hasLocalSpeaking) return;
+
         if (item.role === "assistant") {
-          // aqui nós **nunca** tentamos usar áudio do Redis
           renderAIAudioMessage({
             transcript:       item.transcript       || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text:    item.feedback_text    || "",
-            audioBase64:      null, // sempre null vindo do Redis
+            audioBase64:      null, // nunca confiamos em áudio vindo do Redis
           });
         } else if (item.role === "user" && item.transcript) {
-          // só mostra o texto do aluno
           const el = document.createElement("div");
           el.className = "msg user speak-msg";
           el.innerHTML =
@@ -1213,7 +1214,7 @@ async function loadRemoteHistory() {
           speakConversation.scrollTop = speakConversation.scrollHeight;
         }
 
-        return; // não cair no fluxo de chat
+        return;
       }
 
       // 2) CHAT normal
@@ -1227,11 +1228,9 @@ async function loadRemoteHistory() {
     });
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
-    // fallback local se der erro na rede
     loadLocalHistory();
   }
 }
-
 
 /* ---------- EVENTOS ---------- */
 btn.addEventListener('click', send);
