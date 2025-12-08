@@ -566,19 +566,36 @@ function loadLocalHistory() {
 /* ---------- HISTÓRICO SPEAKING (localStorage) ---------- */
 function saveSpeakHistory(entry) {
   try {
+    // Lê o que já existe
     const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
     let arr = [];
+
     if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) arr = parsed;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) arr = parsed;
+      } catch (err) {
+        console.warn('[speaking] JSON inválido no localStorage, limpando chave.', err);
+        // Se tiver lixo, limpamos e recomeçamos
+        arr = [];
+      }
     }
+
+    // Adiciona o novo registro (user ou assistant)
     arr.push(entry);
-    if (arr.length > 40) {
-      arr = arr.slice(arr.length - 40);
+
+    // Mantém só os 10 últimos registros (5 pares user+IA) pra não estourar o limite
+    if (arr.length > 10) {
+      arr = arr.slice(-10);
     }
+
     localStorage.setItem(LOCAL_SPEAK_HISTORY_KEY, JSON.stringify(arr));
+    console.log('[speaking] saveSpeakHistory ->', arr.length, 'itens salvos.');
   } catch (e) {
-    console.error('Erro ao salvar histórico speaking:', e);
+    console.error(
+      '[speaking] Erro ao salvar histórico (localStorage pode estar bloqueado ou sem espaço):',
+      e
+    );
   }
 }
 
@@ -734,25 +751,46 @@ function appendAIAudioMessage(data){
 function loadSpeakHistory() {
   try {
     const raw = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return;
+    if (!raw) {
+      console.log('[speaking] loadSpeakHistory: nenhum histórico salvo.');
+      return;
+    }
+
+    let arr;
+    try {
+      arr = JSON.parse(raw);
+    } catch (err) {
+      console.error('[speaking] JSON inválido no localStorage. Limpando chave.', err);
+      localStorage.removeItem(LOCAL_SPEAK_HISTORY_KEY);
+      return;
+    }
+
+    if (!Array.isArray(arr)) {
+      console.warn('[speaking] Formato inesperado no localStorage. Limpando chave.');
+      localStorage.removeItem(LOCAL_SPEAK_HISTORY_KEY);
+      return;
+    }
+
+    console.log('[speaking] loadSpeakHistory: carregando', arr.length, 'itens.');
 
     arr.forEach(item => {
       if (!item || !item.role) return;
+
       if (item.role === 'user' && item.audioBase64) {
+        // Reconstroi o áudio gravado pelo aluno
         renderStudentAudioMessage(item.audioBase64);
       } else if (item.role === 'assistant') {
+        // Reconstroi o feedback + áudio de correção, se tiver
         renderAIAudioMessage({
-          transcript: item.transcript,
-          correct_sentence: item.correct_sentence,
-          feedback_text: item.feedback_text,
-          audioBase64: item.audioBase64
+          transcript:        item.transcript,
+          correct_sentence:  item.correct_sentence,
+          feedback_text:     item.feedback_text,
+          audioBase64:       item.audioBase64 || null
         });
       }
     });
   } catch (e) {
-    console.error('Erro ao carregar histórico speaking:', e);
+    console.error('[speaking] Erro ao carregar histórico speaking:', e);
   }
 }
 
