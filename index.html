@@ -756,6 +756,35 @@ function loadSpeakHistory() {
   }
 }
 
+  /* ---------- MAPA DE ÁUDIOS POR ID (localStorage) ---------- */
+function getSpeakAudioByIdMap() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch (e) {
+    console.error('Erro ao ler mapa de áudios por ID:', e);
+    return {};
+  }
+}
+
+function saveSpeakAudioById(pairId, userAudioBase64, ttsAudioBase64) {
+  if (!pairId) return;
+  try {
+    const map  = getSpeakAudioByIdMap();
+    const prev = map[pairId] || {};
+    map[pairId] = {
+      userAudioBase64: userAudioBase64 || prev.userAudioBase64 || null,
+      ttsAudioBase64 : ttsAudioBase64  || prev.ttsAudioBase64  || null,
+      ts: Date.now(),
+    };
+    localStorage.setItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error('Erro ao salvar áudio por ID:', e);
+  }
+}
+  
 /* ---------- QUOTA CHAT ---------- */
 async function atualizarQuotaChat(){
   try {
@@ -1115,6 +1144,12 @@ async function sendSpeakingAudio(base64, durationMs){
 
     const data = await res.json();
     showSpeakingResult(data);
+
+    // salva áudios atrelados ao pairId retornado pelo backend
+    if (data && data.pairId) {
+      saveSpeakAudioById(data.pairId, base64, data.audioBase64 || null);
+    }
+
     speakStatus.textContent = "Correção recebida.";
   } catch (err) {
     console.error("Erro rede /api/speaking", err);
@@ -1133,51 +1168,28 @@ async function loadRemoteHistory() {
     params.set("_", Date.now().toString());
 
     const url = `/api/history?${params.toString()}`;
-
-    // 1) Lê o histórico de SPEAKING salvo neste navegador (localStorage)
-    let localSpeakList = [];
-    try {
-      const rawLS = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
-      if (rawLS) {
-        const parsed = JSON.parse(rawLS);
-        if (Array.isArray(parsed)) localSpeakList = parsed;
-      }
-    } catch (e) {
-      console.error("Erro lendo LS speaking para merge:", e);
-    }
-    let localSpeakIndex = 0;
-
-    // helper para pegar o PRÓXIMO item de speaking daquele role no localStorage
-    const takeLocalSpeak = (expectedRole) => {
-      while (localSpeakIndex < localSpeakList.length) {
-        const c = localSpeakList[localSpeakIndex++];
-        if (!c || c.role !== expectedRole) continue;
-        return c;
-      }
-      return null;
-    };
-
-    // 2) Busca histórico remoto (Upstash)
     const res = await fetch(url, { credentials: "include" });
-    
+
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: se der erro, usa só o que já tiver salvo localmente
-      loadLocalHistory();   // chat local
-      loadSpeakHistory();   // speaking local
+      // fallback: usa o que já tiver salvo localmente
+      loadLocalHistory();
+      loadSpeakHistory();
       return;
     }
 
-    const data = await res.json().catch(() => ({}));
+    const data  = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
 
-    // se não tiver nada no Redis, volta pro localStorage
     if (!items.length) {
       console.log("Histórico remoto vazio; usando fallback localStorage.");
       loadLocalHistory();
       loadSpeakHistory();
       return;
     }
+
+    // Áudios salvos neste navegador (por pairId)
+    const audioMap = getSpeakAudioByIdMap();
 
     // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
@@ -1187,17 +1199,15 @@ async function loadRemoteHistory() {
 
       // ---------- SPEAKING ----------
       if (item.kind === "speaking") {
-        const role = item.role || "assistant";
+        const role   = item.role === "user" ? "user" : "assistant";
+        const pairId = item.pairId || null;
+        const audioPair = pairId ? audioMap[pairId] : null;
 
         if (role === "user") {
-          const local = takeLocalSpeak("user");
-          const base64 = local && local.audioBase64 ? local.audioBase64 : null;
-
-          if (base64) {
-            // neste navegador temos o áudio → toca normalmente
-            renderStudentAudioMessage(base64);
+          // áudio do aluno
+          if (audioPair && audioPair.userAudioBase64) {
+            renderStudentAudioMessage(audioPair.userAudioBase64);
           } else {
-            // outro dispositivo ou sem áudio salvo localmente → mostra só texto/placeholder
             const el = document.createElement("div");
             el.className = "msg user speak-msg";
             const texto = item.transcript
@@ -1208,15 +1218,15 @@ async function loadRemoteHistory() {
             speakConversation.scrollTop = speakConversation.scrollHeight;
           }
         } else {
-          // assistant (feedback da IA)
-          const local = takeLocalSpeak("assistant");
-          const base64 = local && local.audioBase64 ? local.audioBase64 : null;
+          // resposta da IA + TTS
+          const ttsBase64 =
+            audioPair && audioPair.ttsAudioBase64 ? audioPair.ttsAudioBase64 : null;
 
           renderAIAudioMessage({
             transcript: item.transcript || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text: item.feedback_text || "",
-            audioBase64: base64, // se tiver salvo localmente, toca; senão só texto
+            audioBase64: ttsBase64,
           });
         }
         return; // não deixa cair na parte de chat
@@ -1228,7 +1238,6 @@ async function loadRemoteHistory() {
       const who = item.role === "user" ? "user" : "bot";
       addMsg(item.content, who);
 
-      // alimenta o array messages pra manter o contexto da conversa
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
