@@ -1202,6 +1202,7 @@ async function loadRemoteHistory() {
 
     const params = new URLSearchParams();
     if (t) params.set("t", t);
+    // param extra só pra garantir que o browser não cache
     params.set("_", Date.now().toString());
 
     const url = `/api/history?${params.toString()}`;
@@ -1209,6 +1210,7 @@ async function loadRemoteHistory() {
 
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
+      // fallback: só o histórico de chat salvo localmente
       loadLocalHistory();
       return;
     }
@@ -1222,37 +1224,49 @@ async function loadRemoteHistory() {
       return;
     }
 
-    // 👉 verifica se já temos speaking salvo localmente
-    const hasLocalSpeaking = !!localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+    // Mapa de áudios que ESTE dispositivo conhece (por pairId)
+    const audioMap = getSpeakAudioByIdMap();
 
+    // garante ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach((item) => {
       if (!item) return;
 
-      // 1) SPEAKING – texto global (sem áudio do Redis)
+      // 1) SPEAKING
       if (item.kind === "speaking") {
+        const pairId    = item.pairId || item.id || null;
+        const localAudio = pairId ? audioMap[pairId] : null;
 
-        // 👉 se já tem histórico local, não renderiza o remoto
-        if (hasLocalSpeaking) return;
+        if (item.role === "user") {
+          // Se este dispositivo tem o áudio do aluno, usa ele;
+          // senão, mostra só o texto que veio do servidor.
+          if (localAudio && localAudio.userAudioBase64) {
+            renderStudentAudioMessage(localAudio.userAudioBase64);
+          } else if (item.transcript) {
+            const el = document.createElement("div");
+            el.className = "msg user speak-msg";
+            el.innerHTML =
+              `<strong>Você:</strong> ${escapeHtml(item.transcript)}`;
+            speakConversation.appendChild(el);
+            speakConversation.scrollTop = speakConversation.scrollHeight;
+          }
+        } else if (item.role === "assistant") {
+          // TTS salvo localmente (se este device já recebeu esse áudio)
+          const ttsBase64 =
+            localAudio && localAudio.ttsAudioBase64
+              ? localAudio.ttsAudioBase64
+              : null;
 
-        if (item.role === "assistant") {
           renderAIAudioMessage({
             transcript:       item.transcript       || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text:    item.feedback_text    || "",
-            audioBase64:      null, // nunca confiamos em áudio vindo do Redis
+            audioBase64:      ttsBase64, // null em devices onde não existe o áudio
           });
-        } else if (item.role === "user" && item.transcript) {
-          const el = document.createElement("div");
-          el.className = "msg user speak-msg";
-          el.innerHTML =
-            `<strong>Você:</strong> ${escapeHtml(item.transcript)}`;
-          speakConversation.appendChild(el);
-          speakConversation.scrollTop = speakConversation.scrollHeight;
         }
 
-        return;
+        return; // não deixa cair na parte de chat
       }
 
       // 2) CHAT normal
@@ -1266,6 +1280,7 @@ async function loadRemoteHistory() {
     });
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
+    // fallback local se der erro na rede (chat)
     loadLocalHistory();
   }
 }
@@ -1291,14 +1306,12 @@ captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
 
-// 1) Primeiro: tenta reconstruir os áudios de speaking do navegador
-loadSpeakHistory();
-
-// 2) Depois: carrega o histórico remoto (chat e, se não houver nada local,
-//    também os textos de speaking)
+// Agora a FONTE PRINCIPAL do histórico é o Redis (/api/history)
+// Ele já monta chat + speaking e, dentro do speaking,
+// cola os áudios locais quando existirem.
 loadRemoteHistory();
 
-// 3) Carrega a quota de minutos de áudio
+// Quota de minutos de speaking
 loadSpeakingQuotaOnStart();
 </script>
 </body>
