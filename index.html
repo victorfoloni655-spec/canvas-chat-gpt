@@ -1177,7 +1177,7 @@ async function loadRemoteHistory() {
       return;
     }
 
-    const data = await res.json().catch(() => ({}));
+    const data  = await res.json().catch(() => ({}));
     const items = Array.isArray(data.items) ? data.items : [];
 
     if (!items.length) {
@@ -1186,52 +1186,42 @@ async function loadRemoteHistory() {
       return;
     }
 
-    // Se já carregamos speaking do localStorage,
-    // não vamos duplicar com o que vem do Redis.
-    const hasLocalSpeaking = speakConversation.children.length > 0;
-
-    // garante ordem cronológica
+    // ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach((item) => {
       if (!item) return;
 
-      // 1) SPEAKING
+      // 1) SPEAKING – texto global (sem áudio do Redis)
       if (item.kind === "speaking") {
-        // Se já temos histórico de speaking local, ignoramos o remoto
-        if (hasLocalSpeaking) return;
 
-        if (item.role === "user") {
-          // histórico antigo pode ter audioBase64;
-          // o novo só tem transcript + hasAudio.
-          if (item.audioBase64) {
-            renderStudentAudioMessage(item.audioBase64);
-          } else if (item.transcript) {
-            const el = document.createElement("div");
-            el.className = "msg user speak-msg";
-            el.innerHTML =
-              `<strong>Você:</strong> ${escapeHtml(item.transcript)}`;
-            speakConversation.appendChild(el);
-            speakConversation.scrollTop = speakConversation.scrollHeight;
-          }
-        } else if (item.role === "assistant") {
+        if (item.role === "assistant") {
+          // aqui nós **nunca** tentamos usar áudio do Redis
           renderAIAudioMessage({
-            transcript: item.transcript || "",
+            transcript:       item.transcript       || "",
             correct_sentence: item.correct_sentence || "",
-            feedback_text: item.feedback_text || "",
-            audioBase64: item.audioBase64 || null, // geralmente null agora
+            feedback_text:    item.feedback_text    || "",
+            audioBase64:      null, // sempre null vindo do Redis
           });
+        } else if (item.role === "user" && item.transcript) {
+          // só mostra o texto do aluno
+          const el = document.createElement("div");
+          el.className = "msg user speak-msg";
+          el.innerHTML =
+            `<strong>Você:</strong> ${escapeHtml(item.transcript)}`;
+          speakConversation.appendChild(el);
+          speakConversation.scrollTop = speakConversation.scrollHeight;
         }
-        return; // não deixa cair na parte de chat
+
+        return; // não cair no fluxo de chat
       }
 
-      // 2) CHAT (inclui históricos antigos, tratados como kind:"chat")
+      // 2) CHAT normal
       if (typeof item.content !== "string") return;
 
       const who = item.role === "user" ? "user" : "bot";
       addMsg(item.content, who);
 
-      // alimenta o array messages pra manter o contexto da conversa
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
@@ -1241,6 +1231,7 @@ async function loadRemoteHistory() {
     loadLocalHistory();
   }
 }
+
 
 /* ---------- EVENTOS ---------- */
 btn.addEventListener('click', send);
