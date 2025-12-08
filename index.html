@@ -13,7 +13,7 @@
     --border:#243041;
   }
 
-  *, *::before, *::after {
+  * , *::before, *::after {
     box-sizing: border-box;
   }
 
@@ -319,9 +319,9 @@
     line-height: 1.0;
     font-weight: 600;
   }
-
+ 
   .speak-controls #record-btn {
-    min-width: 120px;
+    min-width: 120px;       /* garante que ele fique larguinho */
   }
 
   @media (max-width: 600px) {
@@ -397,7 +397,7 @@ const LOCAL_HISTORY_KEY       = 'ia_english_history_v1';
 const LOCAL_SPEAK_HISTORY_KEY = 'ia_english_speaking_v1';
 const LOCAL_UID_KEY           = 'ia_english_uid_v1';
 const LOCAL_SPEAK_AUDIO_BY_ID_KEY = 'ia_english_speaking_audio_by_id_v1';
-
+  
 const chat    = document.getElementById('chat');
 const input   = document.getElementById('input');
 const btn     = document.getElementById('send');
@@ -708,7 +708,7 @@ function renderAIAudioMessage(data){
   speakConversation.scrollTop = speakConversation.scrollHeight;
 }
 
-/* Versões que renderizam + salvam (áudio no localStorage) */
+/* Versões que renderizam + salvam */
 function appendStudentAudioMessage(base64){
   renderStudentAudioMessage(base64);
   saveSpeakHistory({
@@ -756,7 +756,7 @@ function loadSpeakHistory() {
   }
 }
 
-/* ---------- MAPA DE ÁUDIOS POR ID (opcional, se backend enviar pairId) ---------- */
+  /* ---------- MAPA DE ÁUDIOS POR ID (localStorage) ---------- */
 function getSpeakAudioByIdMap() {
   try {
     const raw = localStorage.getItem(LOCAL_SPEAK_AUDIO_BY_ID_KEY);
@@ -784,7 +784,7 @@ function saveSpeakAudioById(pairId, userAudioBase64, ttsAudioBase64) {
     console.error('Erro ao salvar áudio por ID:', e);
   }
 }
-
+  
 /* ---------- QUOTA CHAT ---------- */
 async function atualizarQuotaChat(){
   try {
@@ -839,12 +839,14 @@ async function loadSpeakingQuotaOnStart() {
 /* ---------- BADGE TOPO ---------- */
 function updateBadge() {
   if (currentMode === 'chat') {
+    // Modo CHAT → mostra mensagens restantes
     if (chatQuota) {
       badge.textContent = `Restante ${chatQuota.remaining} / ${chatQuota.limit} msgs`;
     } else {
       badge.textContent = 'carregando…';
     }
   } else {
+    // Modo SPEAKING → mostra minutos + segundos
     if (speakingQuota && typeof speakingQuota.limitSeconds === 'number') {
       const used  = speakingQuota.usedSeconds || 0;
       const limit = speakingQuota.limitSeconds;
@@ -874,6 +876,7 @@ function setMode(mode) {
     chatSection.style.display  = 'flex';
     speakSection.style.display = 'none';
 
+    // garante que o chat abra sempre no final
     setTimeout(() => {
       chat.scrollTop = chat.scrollHeight;
     }, 50);
@@ -883,6 +886,7 @@ function setMode(mode) {
     chatSection.style.display  = 'none';
     speakSection.style.display = 'flex';
 
+    // sempre que abrir a aba de Pronunciation, rola pro último áudio
     setTimeout(() => {
       speakConversation.scrollTop = speakConversation.scrollHeight;
     }, 50);
@@ -978,9 +982,10 @@ let recordTimerId = null;
 function resetRecordingUI(){
   isRecording = false;
   recordBtn.disabled = false;
-  recordBtn.textContent = '🎙️ Gravar';
-  recordBtn.classList.remove('btn-recording');
+  recordBtn.textContent = '🎙️ Gravar';       // volta pro texto original
+  recordBtn.classList.remove('btn-recording'); // só por garantia
 
+  // volta o cancelar pro estilo "secundário" e desabilitado
   cancelRecordBtn.disabled = true;
   cancelRecordBtn.classList.remove('btn-danger');
   cancelRecordBtn.classList.add('btn-secondary');
@@ -1008,9 +1013,11 @@ async function startRecording(){
 
     speakStatus.textContent = "Gravando... fale sua frase em inglês.";
 
+    // Botão principal: tiffany e vira "Enviar"
     recordBtn.textContent = "Enviar";
     recordBtn.classList.remove('btn-recording');
 
+    // Botão cancelar: vermelho
     cancelRecordBtn.disabled = false;
     cancelRecordBtn.classList.remove('btn-secondary');
     cancelRecordBtn.classList.add('btn-danger');
@@ -1138,6 +1145,7 @@ async function sendSpeakingAudio(base64, durationMs){
     const data = await res.json();
     showSpeakingResult(data);
 
+    // salva áudios atrelados ao pairId retornado pelo backend
     if (data && data.pairId) {
       saveSpeakAudioById(data.pairId, base64, data.audioBase64 || null);
     }
@@ -1156,6 +1164,7 @@ async function loadRemoteHistory() {
 
     const params = new URLSearchParams();
     if (t) params.set("t", t);
+    // param extra só pra garantir que o browser não cache
     params.set("_", Date.now().toString());
 
     const url = `/api/history?${params.toString()}`;
@@ -1163,6 +1172,7 @@ async function loadRemoteHistory() {
 
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
+      // fallback: só o histórico de chat salvo localmente
       loadLocalHistory();
       return;
     }
@@ -1176,28 +1186,25 @@ async function loadRemoteHistory() {
       return;
     }
 
-    // Se já temos speaking vindo do localStorage, usamos ele como "fonte oficial"
-    const hasLocalSpeaking = speakConversation.children.length > 0;
-
+    // ordem cronológica
     items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
     items.forEach((item) => {
       if (!item) return;
 
-      // 1) SPEAKING – texto global (sem áudio no Redis)
+      // 1) SPEAKING – texto global (sem áudio do Redis)
       if (item.kind === "speaking") {
 
-        // Se já carregamos speaking local, ignoramos o remoto pra não duplicar
-        if (hasLocalSpeaking) return;
-
         if (item.role === "assistant") {
+          // aqui nós **nunca** tentamos usar áudio do Redis
           renderAIAudioMessage({
             transcript:       item.transcript       || "",
             correct_sentence: item.correct_sentence || "",
             feedback_text:    item.feedback_text    || "",
-            audioBase64:      null, // nunca confiamos em áudio vindo do Redis
+            audioBase64:      null, // sempre null vindo do Redis
           });
         } else if (item.role === "user" && item.transcript) {
+          // só mostra o texto do aluno
           const el = document.createElement("div");
           el.className = "msg user speak-msg";
           el.innerHTML =
@@ -1206,7 +1213,7 @@ async function loadRemoteHistory() {
           speakConversation.scrollTop = speakConversation.scrollHeight;
         }
 
-        return;
+        return; // não cair no fluxo de chat
       }
 
       // 2) CHAT normal
@@ -1220,9 +1227,11 @@ async function loadRemoteHistory() {
     });
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
+    // fallback local se der erro na rede
     loadLocalHistory();
   }
 }
+
 
 /* ---------- EVENTOS ---------- */
 btn.addEventListener('click', send);
@@ -1245,10 +1254,11 @@ captureTokenFromURL();
 setMode('chat');
 atualizarQuotaChat();
 
-// 1) Primeiro: tenta reconstruir os áudios de speaking do navegador (mesmo dispositivo)
+// 1) Primeiro: tenta reconstruir os áudios de speaking do navegador
 loadSpeakHistory();
 
-// 2) Depois: carrega o histórico remoto (chat + texto de speaking)
+// 2) Depois: carrega o histórico remoto (chat e, se não houver nada local,
+//    também os textos de speaking)
 loadRemoteHistory();
 
 // 3) Carrega a quota de minutos de áudio
