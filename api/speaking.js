@@ -63,6 +63,11 @@ async function readJson(req) {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
+// id único para cada par (user + assistant)
+function makePairId() {
+  return "spk_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+}
+
 // --------- RESOLVE IDENTIDADE (mesma lógica de chat/history) ---------
 
 async function resolveUserId(req, body) {
@@ -288,20 +293,20 @@ async function appendSpeakingHistory(userId, {
   correct_sentence,
   feedback_text,
   ttsAudioBase64,
+  pairId,
 }) {
   try {
     const key = historyKey(userId);
     const now = Date.now();
 
-    // ⚠️ IMPORTANTE:
-    // - Não salvamos mais audioBase64 no Redis.
-    // - Guardamos só texto + um flag dizendo se tinha áudio.
+    // Não salvamos audioBase64 no Redis.
     const entryUser = JSON.stringify({
       kind: "speaking",
       role: "user",
       transcript: transcript || null,
-      hasAudio: !!userAudioBase64,  // só um indicador leve
+      hasAudio: !!userAudioBase64,
       ts: now,
+      pairId: pairId || null,
     });
 
     const entryBot = JSON.stringify({
@@ -310,8 +315,9 @@ async function appendSpeakingHistory(userId, {
       transcript: transcript || null,
       correct_sentence: correct_sentence || null,
       feedback_text: feedback_text || null,
-      hasAudio: !!ttsAudioBase64,   // idem
+      hasAudio: !!ttsAudioBase64,
       ts: now,
+      pairId: pairId || null,
     });
 
     await redis.rpush(key, entryUser, entryBot);
@@ -410,6 +416,8 @@ export default async function handler(req, res) {
     const spokenText = buildSpokenText(correct_sentence, feedback_text);
     const audioBase64 = await synthesizeSpeech(spokenText);
 
+    const pairId = makePairId();
+
     // salva histórico integrated
     await appendSpeakingHistory(userId, {
       userAudioBase64: audio,
@@ -417,6 +425,7 @@ export default async function handler(req, res) {
       correct_sentence,
       feedback_text,
       ttsAudioBase64: audioBase64,
+      pairId,
     });
 
     // debug: quantos registros totais (chat + speaking) esse user tem?
@@ -438,6 +447,7 @@ export default async function handler(req, res) {
       userId,
       historyCount,
       historyKey: historyKey(userId),
+      pairId, // << ID da tentativa (vamos usar no front)
     });
   } catch (e) {
     console.error("SPEAKING error:", e);
