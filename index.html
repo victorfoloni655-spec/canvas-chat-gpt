@@ -1134,13 +1134,37 @@ async function loadRemoteHistory() {
 
     const url = `/api/history?${params.toString()}`;
 
+    // 1) Lê o histórico de SPEAKING salvo neste navegador (localStorage)
+    let localSpeakList = [];
+    try {
+      const rawLS = localStorage.getItem(LOCAL_SPEAK_HISTORY_KEY);
+      if (rawLS) {
+        const parsed = JSON.parse(rawLS);
+        if (Array.isArray(parsed)) localSpeakList = parsed;
+      }
+    } catch (e) {
+      console.error("Erro lendo LS speaking para merge:", e);
+    }
+    let localSpeakIndex = 0;
+
+    // helper para pegar o PRÓXIMO item de speaking daquele role no localStorage
+    const takeLocalSpeak = (expectedRole) => {
+      while (localSpeakIndex < localSpeakList.length) {
+        const c = localSpeakList[localSpeakIndex++];
+        if (!c || c.role !== expectedRole) continue;
+        return c;
+      }
+      return null;
+    };
+
+    // 2) Busca histórico remoto (Upstash)
     const res = await fetch(url, { credentials: "include" });
     
     if (!res.ok) {
       console.error("Erro ao carregar histórico remoto:", res.status);
-      // fallback: usa o que já tiver salvo localmente
+      // fallback: se der erro, usa só o que já tiver salvo localmente
       loadLocalHistory();   // chat local
-      loadSpeakHistory();   // speaking local (com áudios deste navegador)
+      loadSpeakHistory();   // speaking local
       return;
     }
 
@@ -1161,13 +1185,44 @@ async function loadRemoteHistory() {
     items.forEach((item) => {
       if (!item) return;
 
-      // 🔹 Aqui ignoramos completamente SPEAKING vindo do Redis.
-      // O speaking será desenhado só a partir do localStorage.
+      // ---------- SPEAKING ----------
       if (item.kind === "speaking") {
-        return;
+        const role = item.role || "assistant";
+
+        if (role === "user") {
+          const local = takeLocalSpeak("user");
+          const base64 = local && local.audioBase64 ? local.audioBase64 : null;
+
+          if (base64) {
+            // neste navegador temos o áudio → toca normalmente
+            renderStudentAudioMessage(base64);
+          } else {
+            // outro dispositivo ou sem áudio salvo localmente → mostra só texto/placeholder
+            const el = document.createElement("div");
+            el.className = "msg user speak-msg";
+            const texto = item.transcript
+              ? escapeHtml(item.transcript)
+              : "(áudio gravado em outro dispositivo ou não disponível neste navegador)";
+            el.innerHTML = `<strong>Você:</strong> ${texto}`;
+            speakConversation.appendChild(el);
+            speakConversation.scrollTop = speakConversation.scrollHeight;
+          }
+        } else {
+          // assistant (feedback da IA)
+          const local = takeLocalSpeak("assistant");
+          const base64 = local && local.audioBase64 ? local.audioBase64 : null;
+
+          renderAIAudioMessage({
+            transcript: item.transcript || "",
+            correct_sentence: item.correct_sentence || "",
+            feedback_text: item.feedback_text || "",
+            audioBase64: base64, // se tiver salvo localmente, toca; senão só texto
+          });
+        }
+        return; // não deixa cair na parte de chat
       }
 
-      // CHAT (kind "chat" ou sem kind)
+      // ---------- CHAT ----------
       if (typeof item.content !== "string") return;
 
       const who = item.role === "user" ? "user" : "bot";
@@ -1177,11 +1232,6 @@ async function loadRemoteHistory() {
       const role = who === "user" ? "user" : "assistant";
       messages.push({ role, content: item.content });
     });
-
-    // Depois de renderizar o chat remoto,
-    // carregamos o histórico local de SPEAKING (com áudio deste navegador).
-    loadSpeakHistory();
-
   } catch (err) {
     console.error("Erro ao buscar histórico remoto:", err);
     // fallback local se der erro na rede
